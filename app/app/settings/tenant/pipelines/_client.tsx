@@ -121,7 +121,16 @@ function PipelineEditor({ pipeline }: { pipeline: PipelineRow }) {
   function handleSave() {
     const ok: CustomFieldDef[] = [];
     for (const f of fields) {
-      const parsed = customFieldSchema.safeParse(f);
+      // É AQUI que a opção vazia é descartada — e não durante a digitação.
+      //
+      // Enquanto a pessoa digita "a, b, c" existe um item vazio no fim (a vírgula
+      // recém-digitada). Ele PRECISA sobreviver até aqui, senão o separador some
+      // antes de o texto ficar completo. No salvamento, o texto está pronto e
+      // descartar vazio não apaga nada em andamento.
+      const limpo = tipoTemOpcoes(f.type)
+        ? { ...f, options: (f.options ?? []).filter((o) => o.label.trim() !== "") }
+        : f;
+      const parsed = customFieldSchema.safeParse(limpo);
       if (!parsed.success) {
         toast.error(parsed.error.issues[0]?.message ?? t("Campo inválido."));
         return;
@@ -236,10 +245,20 @@ function PipelineEditor({ pipeline }: { pipeline: PipelineRow }) {
                 placeholder={t("Opções, separadas por vírgula")}
                 value={(f.options ?? []).map((o) => o.label).join(", ")}
                 onChange={(e) => {
+                  // O item VAZIO não pode ser descartado aqui.
+                  //
+                  // O input é CONTROLADO e o que se vê é `options.join(", ")`. Ao
+                  // descartar o vazio a cada tecla, digitar "a," produzia
+                  // ["a", ""] → filter → ["a"] → a vírgula sumia antes de a pessoa
+                  // conseguir digitar a segunda opção, e o campo era IMPOSSÍVEL de
+                  // preencher. O espaço sumia pelo mesmo caminho.
+                  //
+                  // A limpeza passou para o salvamento (handleSave), que é onde
+                  // ela sempre deveria ter estado: lá o texto está completo e
+                  // descartar vazio não apaga nada que a pessoa esteja digitando.
                   const options = e.target.value
                     .split(",")
                     .map((s) => s.trim())
-                    .filter(Boolean)
                     .map((label) => ({ value: label, label }));
                   const next = [...fields];
                   next[i] = { ...f, options };
