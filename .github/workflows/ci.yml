@@ -26,6 +26,11 @@ jobs:
   verify:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    # Fork Opp4System: repo PRIVADO no plano gratuito usa runner menor (7 GB em
+    # vez de 16 GB) e o `tsc --noEmit` do repo inteiro estoura o heap padrão do
+    # Node ("JavaScript heap out of memory"). Teto explícito resolve.
+    env:
+      NODE_OPTIONS: --max-old-space-size=6144
     steps:
       - uses: actions/checkout@v7
 
