@@ -176,6 +176,14 @@ const envSchema = z.object({
   FOLLOWUP_AI_MODEL: z.string().min(1).optional(),
   // Loop do agente — teto de steps de tool-calls por run.
   AGENT_MAX_STEPS: z.coerce.number().int().positive().default(8),
+  // Medição de tempo por fase do turno (linha "tempo por fase do turno" no log).
+  // LIGADA por default: ela existe para descobrir onde estão os segundos que
+  // `llm_calls` não explica, e uma medição opt-in nasceria desligada no ambiente
+  // que mais precisa dela. Uma linha de log por turno é o custo inteiro.
+  AGENT_TURN_TIMING: z
+    .enum(['true', 'false'])
+    .default('true')
+    .transform((v) => v === 'true'),
   // Teto de mensagens FÍSICAS enviadas ao lead por turno (send_message + send_template
   // somados, bolhas incluídas) — nenhum gate de before-send limita CONTAGEM, só ritmo.
   MAX_SENDS_PER_TURN: z.coerce.number().int().positive().default(3),

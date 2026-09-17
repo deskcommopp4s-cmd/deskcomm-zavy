@@ -134,6 +134,24 @@ export interface SendInBubblesOpts<T extends BubbleOutcome = BubbleOutcome> {
    * e um follow-up não responde a nada que ele acabou de mandar.
    */
   antesDaPrimeira?: (primeiraBolha: string) => Promise<void>;
+  /**
+   * Relógio do gancho acima. OPCIONAL — sem ele nada muda e o gancho continua
+   * sendo chamado exatamente uma vez.
+   *
+   * Existe por um motivo estreito: o tempo do turno vem sendo medido por fase, e
+   * "envio" inclui a espera humana de propósito (é o que o lead sente), mas
+   * separar as duas coisas — rede do canal × espera deliberada — exige saber
+   * QUANDO a espera começou. Quem mede é o turno; quem sabe o instante é aqui,
+   * porque é aqui que a espera acontece. Sem esta costura, o turno teria que
+   * reimplementar o gancho para cronometrá-lo.
+   */
+  agora?: () => number;
+  /**
+   * Chamado UMA vez, logo depois de `antesDaPrimeira`, com os instantes (ms) em
+   * que a espera humana começou e terminou — `null` quando não houve espera.
+   * OPCIONAL: sem ele nada é observado e nenhum relógio é lido à toa.
+   */
+  onEsperaHumana?: (inicioMs: number | null, fimMs: number | null) => void;
 }
 
 /**
@@ -141,6 +159,11 @@ export interface SendInBubblesOpts<T extends BubbleOutcome = BubbleOutcome> {
  * pelo mesmo `send` (que no runtime é o channel.send pós-guardrails, com seq++).
  * Para no 1º outcome que não seja de sucesso ('sent'/'already_sent'/'queued')
  * e o devolve — não segue mandando bolha após veto/bloqueio/falha.
+ *
+ * OBSERVABILIDADE (opcional, sem efeito no envio): `agora` +
+ * `onEsperaHumana` entregam ao chamador os instantes da pausa humana, para o
+ * turno separar "espera deliberada" de "tempo de rede do canal" na medição por
+ * fase. Sem essas duas opções, o caminho é byte a byte o que sempre foi.
  *
  * LIMITAÇÃO CONHECIDA: o contador de cap diário do pacing anti-ban (recordSend)
  * conta o send lógico UMA vez por turno, então um turno de N bolhas avança o cap
@@ -159,8 +182,15 @@ export async function sendInBubbles<T extends BubbleOutcome>(
   for (let i = 0; i < bubbles.length; i++) {
     // Antes da 1ª: o atraso humano do turno. Entre as demais: o jitter anti-ban
     // que já existia. Nunca os dois na mesma pausa.
-    if (i === 0) await opts.antesDaPrimeira?.(bubbles[0]!);
-    else await opts.sleep(opts.jitter());
+    if (i === 0) {
+      // O par `agora`/`onEsperaHumana` só custa quando há quem observe: sem o
+      // callback, NENHUM relógio é lido — o caminho sem medição fica idêntico ao
+      // de antes de ela existir (nem uma chamada de `Date.now` a mais).
+      const observar = opts.onEsperaHumana !== undefined;
+      const inicioDaEspera = observar ? (opts.agora?.() ?? null) : null;
+      await opts.antesDaPrimeira?.(bubbles[0]!);
+      if (observar) opts.onEsperaHumana!(inicioDaEspera, opts.agora?.() ?? null);
+    } else await opts.sleep(opts.jitter());
     last = await opts.send(bubbles[i]!);
     if (!OK_KINDS.has(last.kind)) return last; // veto/bloqueio/falha: para aqui
   }

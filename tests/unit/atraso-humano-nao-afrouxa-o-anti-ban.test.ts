@@ -134,9 +134,16 @@ describe("fiação — a espera humana é paga UMA vez por turno", () => {
   });
 
   it("o call site mantém o jitter anti-ban entre bolhas ao lado do atraso humano", () => {
-    const i = FONTE_INBOUND.indexOf("sendInBubbles(finalBody, {");
-    expect(i).toBeGreaterThan(-1);
-    const janela = FONTE_INBOUND.slice(i, i + 1600);
+    // O call site é identificado pela própria marca do atraso humano: o trecho
+    // vai do `sendInBubbles` que o precede até o `antesDaPrimeira`. Assim o teste
+    // continua ancorado no call site do `send_message` mesmo se outro ponto
+    // (`send_template`) voltar a chamar `sendInBubbles` só com jitter.
+    const fim = FONTE_INBOUND.indexOf("antesDaPrimeira: async (primeiraBolha: string)");
+    expect(fim).toBeGreaterThan(-1);
+    const inicio = FONTE_INBOUND.lastIndexOf("sendInBubbles(", fim);
+    expect(inicio).toBeGreaterThan(-1);
+    // `fim` aponta para o INÍCIO da assinatura: a janela precisa incluí-la.
+    const janela = FONTE_INBOUND.slice(inicio, fim + "antesDaPrimeira: async".length);
     // Os dois convivem: o jitter é throttle anti-ban entre mensagens físicas, o
     // atraso humano é a pausa do turno. Perder o primeiro é afrouxar o anti-ban.
     expect(janela).toMatch(/jitter:\s*\(\)\s*=>\s*1200 \+ Math\.floor\(Math\.random\(\) \* 800\)/);

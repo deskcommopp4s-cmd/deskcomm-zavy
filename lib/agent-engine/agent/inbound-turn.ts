@@ -155,6 +155,11 @@ import { capabilitiesOf } from '@/lib/channels/capabilities';
 import { renderTemplateBody } from '@/lib/channels/meta/render-template';
 import { esperarComoHumano } from './atraso-humano';
 import { iniciarDigitandoContinuo, type DigitandoContinuo } from './digitando-continuo';
+import {
+  criarMedicaoDeFases,
+  fecharMedicaoDeFases,
+  type MedicaoDeFases,
+} from './medicao-de-fases';
 import { sendInBubbles } from './split-message';
 import type { DisclosureMode } from '../guardrails/disclosure/template';
 import { decidePromise } from '../guardrails/promise/engine';
@@ -1080,6 +1085,14 @@ export interface InboundTurnKnobs {
    * de 21 dias é aplicado.
    */
   allowlistTtlMs?: number;
+  /**
+   * Medição de tempo por fase do turno (`medicao-de-fases.ts`). Ausente =
+   * LIGADA — o padrão tem de ser ligado, porque é ele que produz o diagnóstico
+   * de onde estão os ~23s do turno que `llm_calls` não explica. Desligar é
+   * explícito (`AGENT_TURN_TIMING=false`), pelo mesmo motivo de qualquer outro
+   * gate: uma linha de log por turno é barata, cegueira não.
+   */
+  medirTempo?: boolean;
 }
 
 /** Default de `allowlistTtlMs` (21 dias) para testes que omitem o knob. */
@@ -1632,6 +1645,28 @@ export async function runAgentTurn(
     tenant_id: job.organization_id,
     lead_id: leadIdDoJob,
   });
+  // A MEDIÇÃO NASCE AQUI, no ponto mais externo do turno.
+  //
+  // O "digitando…" (item 2 do platô) acende depois das barreiras que descartam
+  // — e por isso ele é cego para tudo o que roda ANTES delas. Medir do mesmo
+  // ponto herdaria a cegueira justo na parte que não conhecemos. Daqui de fora,
+  // a fase `preparo` cobre fuso, orçamento, elegibilidade, janela anti-ban,
+  // configuração publicada e todo o resto: é onde se descobre se as barreiras
+  // baratas são baratas.
+  //
+  // As fases seguintes são marcadas LÁ NA FRENTE, cada uma antes do I/O que ela
+  // mede (`marcar` fecha a anterior): `compactacao` na 2ª chamada de IA,
+  // `ferramentas` na montagem das tools/MCP, `etapa`/`jailbreak` nos dois
+  // classificadores, `contexto` na montagem do prompt, `chamada_principal` no
+  // `runModelCall` do modelo, `envio` dentro da tool `send_message` e
+  // `checkpoint` no fechamento. A soma das fases fecha em `total_ms`.
+  //
+  // Ela SOBREVIVE à escolta de orçamento de propósito: quando o teto estoura, o
+  // turno é interrompido por um caminho que não passa pelo `finally` de baixo, e
+  // é exatamente o turno em que interessa saber onde o tempo foi para o ralo.
+  const medicao: MedicaoDeFases | null =
+    deps.knobs.medirTempo === false ? null : criarMedicaoDeFases({ log: logDaEscolta });
+  medicao?.marcar('preparo');
   await comHandoffSeOrcamentoAcabar(
     {
       pool,
@@ -1669,7 +1704,7 @@ export async function runAgentTurn(
         ),
       log: logDaEscolta,
     },
-    () => executarTurnoDoAgente(deps, job, pool, ctx, input),
+    () => executarTurnoDoAgente(deps, job, pool, ctx, input, undefined, medicao),
   );
 }
 
@@ -1698,6 +1733,8 @@ async function executarTurnoDoAgente(
   ctx: { workerId: string },
   input: AgentTurnInput,
   preview?: TurnPreview,
+  /** `null` = turno sem medição (prévia); `undefined` = caminho que não mede. */
+  medicaoDoTurno?: MedicaoDeFases | null,
 ): Promise<void> {
   const liveJob = (): JobRow => {
     if (!job) throw new Error('preview_operational_job_forbidden');
@@ -2235,6 +2272,10 @@ async function executarTurnoDoAgente(
   let effectivePrevious = previous;
   let effectiveContext = openingContext.context;
   if (deps.knobs.compaction !== undefined) {
+    // A compactação é a 2ª chamada de IA do turno e NÃO é preparo: ela roda por
+    // um caminho condicional (histórico longo) e tem purpose próprio em
+    // `llm_calls`. Medida separada, o log diz se a conversa longa é o turno caro.
+    medicaoDoTurno?.marcar('compactacao');
     const compacted = await maybeCompact(
       pool,
       deps.llmCfg,
@@ -2296,6 +2337,13 @@ async function executarTurnoDoAgente(
   // Índice da memória durável do lead (F3-05) — headlines dentro do orçamento fixo,
   // injetado no SUFIXO da abertura (não invalida o prefixo cacheável F2-17). Montado
   // DEPOIS do flush (F3-07) para que as notas gravadas neste turno já entrem no índice.
+  //
+  // O rótulo abaixo fecha `compactacao` (quando ela rodou) e abre `ferramentas`: o
+  // índice de notas, o de compromissos, a tabela de promessas, o cancelamento de
+  // crons de opt-out, as skills e a montagem das tools/MCP — tudo leitura de banco
+  // e resolução de catálogo, nada de modelo. Cobre o que faltava do "preparo" sem
+  // misturá-lo com a única chamada de IA que acontecia aqui dentro.
+  medicaoDoTurno?.marcar('ferramentas');
   const notesIndexBlock = preview
     ? (preview.notes ?? []).map((n) => n.headline + ': ' + n.body).join('\n')
     : await buildNotesIndexBlock(pool, tenantId, leadId, deps.knobs.notesIndexMaxTokens);
@@ -2824,6 +2872,22 @@ async function executarTurnoDoAgente(
                 maxChars: agentConfig?.splitMaxChars ?? 600,
                 sleep: deps.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms))),
                 jitter: () => 1200 + Math.floor(Math.random() * 800), // piso no throttle anti-ban (1.2s) — bolhas são mensagens físicas
+                // O relógio do gancho de espera humana abaixo, e por que ele é
+                // passado AQUI e não lido lá dentro: medir a espera DELIBERADA
+                // separada do tempo de rede do canal exige um par (início, fim),
+                // e quem sabe o início é o dono do laço. Sem isto, o turno teria
+                // de reimplementar o gancho só para cronometrá-lo — ver o
+                // cabeçalho de `split-message.ts`.
+                agora: () => Date.now(),
+                onEsperaHumana: (inicioMs, fimMs) => {
+                  if (inicioMs === null || fimMs === null) return;
+                  // A `envio` abre no INSTANTE em que o turno passa a falar com o
+                  // lead — e não antes, porque a chamada principal é quem executa
+                  // esta tool, e marcá-la antes colocaria o modelo inteiro dentro
+                  // do envio.
+                  medicaoDoTurno?.marcar('envio');
+                  runLog.info('espera humana medida', { espera_humana_ms: fimMs - inicioMs });
+                },
                 // ANTES da 1ª bolha: "digitando…" + espera proporcional ao texto.
                 // É o conserto do "responde rápido demais" (ver atraso-humano.ts).
                 // NÃO substitui o jitter acima: aquele é throttle anti-ban entre
@@ -3602,6 +3666,9 @@ async function executarTurnoDoAgente(
     let stageSuggestion: LeadStage | null = null;
     let stageHintBlock = '';
     if (deps.knobs.stageClassifier !== undefined) {
+      // O rótulo vem ANTES do await: o preparo (playbook, contexto do lead,
+      // memória, MCP, opt-out/opt-in e o resto das barreiras) termina aqui.
+      medicaoDoTurno?.marcar('etapa');
       stageSuggestion = await classifyStage(
         pool,
         deps.llmCfg,
@@ -3624,6 +3691,7 @@ async function executarTurnoDoAgente(
     // (a mensagem/reason nunca vão a log). A correlação com promessa fora de tabela escala no fim.
     let jailbreakLevel: JailbreakLevel = 'none';
     if (camadaLigada(camadas.jailbreak, deps.knobs.jailbreak !== undefined)) {
+      medicaoDoTurno?.marcar('jailbreak');
       const verdict = await classifyJailbreak(
         pool,
         deps.llmCfg,
@@ -3728,6 +3796,10 @@ async function executarTurnoDoAgente(
             multimodalInput: agentConfig?.multimodalInput ?? false,
             admin: deps.crmCfg.supabase,
           });
+    // A fase `contexto` termina quando o prompt está montado e as parts nativas
+    // resolvidas. Nada entre este ponto e a chamada ao modelo faz I/O, então o
+    // intervalo de dois rótulos é ruído de microssegundos.
+    medicaoDoTurno?.marcar('contexto');
     const openingTextOnly: ModelMessage[] = [{ role: 'user', content: openingText }];
     const openingMessages: ModelMessage[] =
       nativeParts.length === 0
@@ -3740,6 +3812,11 @@ async function executarTurnoDoAgente(
     // este corpo inteiro. Escoltar aqui deixaria de fora as chamadas de modelo dos
     // auxiliares (`classifyStage`, `maybeCompact`), que rodam ANTES desta e por
     // isso são as que estouram primeiro.
+    //
+    // A fase `contexto` termina AQUI e por isso o rótulo é colocado agora: ela é
+    // a montagem do prompt (sufixos por-lead, bloco "Agora", skills casadas,
+    // média nativa, projeção do contexto) — tudo caro e nada medido até então.
+    medicaoDoTurno?.marcar('chamada_principal');
     const turn = await runModelCall(
       pool,
       deps.llmCfg,
@@ -3773,6 +3850,12 @@ async function executarTurnoDoAgente(
     // A resposta já saiu (ou o modelo encerrou sem falar): o "digitando…" cumpriu
     // o papel e não deve sobreviver à própria resposta. Para AQUI, antes do
     // `checkpoint` — que é outra chamada de modelo e não fala com o lead.
+    //
+    // A MEDIÇÃO FECHA AQUI, e não depois do fechamento: até este ponto o turno
+    // está respondendo ao lead — `envio` cobre o `runModelCall` inteiro (que é
+    // quem executa o `send_message`, e portanto a espera humana e a rede do
+    // canal). O `checkpoint` é retaguarda e vem depois, na fase dele.
+    fecharMedicaoDeFases(medicaoDoTurno ?? null, runLog);
     digitando?.parar();
 
     // F4-04: correlação dos dois sinais do MESMO turno — jailbreak ALTO + tentativa de
@@ -3822,6 +3905,10 @@ async function executarTurnoDoAgente(
     // turno. Aqui o lead já recebeu resposta, mas a conversa ficaria sem
     // checkpoint e sem dono, e o próximo inbound cairia no mesmo bloqueio, agora
     // sem nada tendo mudado no meio.
+    //
+    // A fase `envio` fecha AQUI: o `runModelCall` da chamada principal é quem
+    // executa o `send_message`, e portanto a espera humana e a rede do canal.
+    medicaoDoTurno?.marcar('checkpoint');
     const closing = await runModelCall(
       pool,
       deps.llmCfg,
@@ -4156,6 +4243,10 @@ async function executarTurnoDoAgente(
     // Um "digitando…" eterno é pior que nenhum: para SEMPRE — erro no meio,
     // retorno antecipado, teto de orçamento. `parar()` é idempotente e barato.
     digitando?.parar();
+    // A linha do tempo por fase fecha AQUI, e não no caminho feliz: ela tem de
+    // sair também quando o turno morre no meio — é justamente aí que se procura
+    // onde os ~23s foram parar. Um `resumo()` a mais é inofensivo (é idempotente).
+    fecharMedicaoDeFases(medicaoDoTurno ?? null, runLog);
     await mcpCleanup?.();
   }
 }
@@ -4193,6 +4284,10 @@ export async function runAgentPreview(
         ),
     },
     preview,
+    // A prévia NÃO é medida: ela não é o turno de produção, e o alvo da medição
+    // é o caminho que atende o lead (44,5s medidos). `null` explícito — não
+    // `undefined` — para o parâmetro não ficar ambíguo com "esqueci de passar".
+    null,
   );
 }
 

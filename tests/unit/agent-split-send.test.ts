@@ -73,4 +73,45 @@ describe("sendInBubbles", () => {
     expect(out.kind).toBe("blocked");
     expect(send).toHaveBeenCalledTimes(2); // parou na 2ª
   });
+
+  it("`onEsperaHumana` entrega o intervalo da pausa DELIBERADA — separado do tempo do canal", async () => {
+    // O turno mede o envio por fase, e o envio inclui a espera humana de
+    // propósito (é o que o lead sente). Separar "espera deliberada" de "rede do
+    // canal" exige saber QUANDO a espera começou: quem sabe é o laço, então o
+    // par `agora`/`onEsperaHumana` é a única costura honesta. Sem o callback,
+    // nada é observado.
+    const tempos = [10_000, 13_500];
+    let i = 0;
+    const onEsperaHumana = vi.fn();
+    const send = vi.fn(async () => ({ kind: "sent", messageId: "m" }));
+
+    await sendInBubbles("uma bolha só", {
+      enabled: false,
+      maxChars: 600,
+      send,
+      sleep: async () => undefined,
+      jitter: () => 0,
+      agora: () => tempos[i++]!,
+      onEsperaHumana,
+      antesDaPrimeira: async () => undefined,
+    });
+
+    expect(onEsperaHumana).toHaveBeenCalledTimes(1);
+    expect(onEsperaHumana).toHaveBeenCalledWith(10_000, 13_500);
+  });
+
+  it("sem `onEsperaHumana` nenhum relógio é lido — caminho de produção sem medição intacto", async () => {
+    const agora = vi.fn(() => 1);
+    const send = vi.fn(async () => ({ kind: "sent", messageId: "m" }));
+    await sendInBubbles("texto", {
+      enabled: false,
+      maxChars: 600,
+      send,
+      sleep: async () => undefined,
+      jitter: () => 0,
+      agora,
+    });
+    expect(agora).not.toHaveBeenCalled();
+    expect(send).toHaveBeenCalledTimes(1);
+  });
 });
