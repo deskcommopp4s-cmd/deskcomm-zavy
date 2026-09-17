@@ -154,6 +154,7 @@ import { isStatusSendable } from '../../channels/meta/template-binding';
 import { capabilitiesOf } from '@/lib/channels/capabilities';
 import { renderTemplateBody } from '@/lib/channels/meta/render-template';
 import { esperarComoHumano } from './atraso-humano';
+import { iniciarDigitandoContinuo, type DigitandoContinuo } from './digitando-continuo';
 import { sendInBubbles } from './split-message';
 import type { DisclosureMode } from '../guardrails/disclosure/template';
 import { decidePromise } from '../guardrails/promise/engine';
@@ -2832,6 +2833,11 @@ async function executarTurnoDoAgente(
                 antesDaPrimeira: async (primeiraBolha: string): Promise<void> => {
                   if (jaEsperouComoHumano) return;
                   jaEsperouComoHumano = true;
+                  // O batimento para ANTES da sinalização do `esperarComoHumano`:
+                  // os dois acendem o MESMO "digitando", e mantê-los vivos juntos
+                  // dispararia presença duplicada. A luz não pisca — a chamada
+                  // logo abaixo a reacende no mesmo instante.
+                  digitando?.parar();
                   // `liveChannel()`, não `channel`: o transporte é anulável (preview
                   // não tem canal) e este é o MESMO acessor que o `send` logo abaixo
                   // usa. Resolver aqui, antes da espera, mantém o desfecho de preview
@@ -3430,7 +3436,32 @@ async function executarTurnoDoAgente(
   // role/scope da ponte nativa; envio e handoff do catálogo são bloqueados —
   // ver edge/crm/mcp-tools.ts). As 8 tools do engine têm precedência de nome.
   let mcpCleanup: (() => Promise<void>) | null = null;
+  // ── O "DIGITANDO" QUE ATRAVESSA O TURNO ───────────────────────────────────
+  //
+  // Acende AQUI, e não em `antesDaPrimeira`: o gancho de `atraso-humano.ts` só
+  // roda quando a 1ª bolha já existe — isto é, DEPOIS de `stage_classifier`,
+  // `jailbreak`, da chamada principal e do `checkpoint`, os ~44s que o lead
+  // passava em silêncio (medido em produção). O batimento cobre essa janela.
+  //
+  // O ponto respeita as barreiras que DESCARTAM em silêncio: handoff
+  // (`isLeadInHandoff`), allowlist (`decidirElegibilidadeDaConversa`), janela
+  // anti-ban, modo assistido/pausado e horário de funcionamento — todas
+  // retornam/adiar ANTES daqui. Acender antes delas mostraria "digitando…" para
+  // um lead que nunca receberia resposta, que é pior que o silêncio. E fica
+  // ANTES das chamadas de IA caras logo abaixo, que é o turno que ele existe
+  // para cobrir.
+  //
+  // `channel` é `null` no preview (não há transporte) e canal sem `signalTyping`
+  // simplesmente não acende — a mesma degradação macia de `esperarComoHumano`.
+  let digitando: DigitandoContinuo | null = null;
   try {
+    if (channel !== null && channel.signalTyping !== undefined) {
+      digitando = iniciarDigitandoContinuo({
+        sinalizar: () =>
+          channel.signalTyping!({ tenantId, conversationId: input.conversationId }),
+        log: runLog,
+      });
+    }
     if (agentConfig !== null && agentConfig.toolIds.length > 0) {
       try {
         // As de OPERAÇÃO saem antes de serem montadas, quando o Operador as tem.
@@ -3738,6 +3769,11 @@ async function executarTurnoDoAgente(
       },
       { registry: deps.registry, log: runLog },
     );
+
+    // A resposta já saiu (ou o modelo encerrou sem falar): o "digitando…" cumpriu
+    // o papel e não deve sobreviver à própria resposta. Para AQUI, antes do
+    // `checkpoint` — que é outra chamada de modelo e não fala com o lead.
+    digitando?.parar();
 
     // F4-04: correlação dos dois sinais do MESMO turno — jailbreak ALTO + tentativa de
     // promessa fora de tabela (F4-01). Ambos estão determinados aqui (o jailbreak rodou na
@@ -4117,6 +4153,9 @@ async function executarTurnoDoAgente(
       model: turn.model,
     });
   } finally {
+    // Um "digitando…" eterno é pior que nenhum: para SEMPRE — erro no meio,
+    // retorno antecipado, teto de orçamento. `parar()` é idempotente e barato.
+    digitando?.parar();
     await mcpCleanup?.();
   }
 }
