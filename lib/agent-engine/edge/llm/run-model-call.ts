@@ -36,6 +36,7 @@ import {
   SQL_ORCAMENTO,
   type ChaveDeOrcamento,
 } from './orcamento';
+import { ferramentasDoPonto } from './ferramentas-do-ponto';
 import { costCents } from './pricing';
 import { createDefaultRegistry, type ProviderRegistry } from './providers';
 import { buildStablePrefix } from './stable-prefix';
@@ -401,13 +402,30 @@ export async function runModelCall(db: pg.Pool, cfg: LlmEdgeConfig, input: RunMo
     ...(deps.log ? { log: deps.log } : {}),
   });
 
+  // A POLÍTICA DE FERRAMENTAS, aplicada no único lugar por onde o request passa.
+  //
+  // Fica ANTES do `buildStablePrefix` de propósito: é o prefixo estável que
+  // carrega as tools e o breakpoint de cache na última delas. Filtrar depois
+  // deixaria o breakpoint apontando para uma tool que não vai ao provedor.
+  const politicaDeFerramentas = ferramentasDoPonto(purpose, input.tools);
+  if (politicaDeFerramentas.descartadas) {
+    // Nunca em silêncio: um call site que passou tools a um ponto que não as
+    // declara é ou desperdício (o caso comum) ou um ponto errado na chamada (o
+    // caso que dói). Sem este warn os dois ficam indistinguíveis no log.
+    deps.log?.warn('llm: ferramentas descartadas — o ponto não as declara', {
+      organization_id: input.tenantId,
+      purpose,
+      ferramentas: input.tools === undefined ? [] : Object.keys(input.tools),
+    });
+  }
+
   // Disciplina de cache: o prefixo estável org-wide (system do playbook + tools
   // em ordem determinística) ganha os breakpoints AQUI, no seam — call sites
   // passam system/tools crus. Tudo por-lead vive em input.messages, DEPOIS do
   // breakpoint. TTL: knob LLM_CACHE_TTL; '1h' é a doutrina.
   const prefix = buildStablePrefix({
     system: input.system,
-    tools: input.tools,
+    tools: politicaDeFerramentas.tools,
     cacheTtl: cfg.cacheTtl ?? '1h',
   });
 
