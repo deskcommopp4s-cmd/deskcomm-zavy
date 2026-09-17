@@ -303,7 +303,12 @@ function chamadasDoNucleo(texto: string) {
       for (let p = node.parent; p; p = p.parent) ancestors.push(p);
       const owner = ancestors.find(ts.isFunctionDeclaration)?.name?.text;
       const escoltado = ancestors.some(p => ts.isCallExpression(p) && ts.isIdentifier(p.expression) && p.expression.text === "comHandoffSeOrcamentoAcabar");
-      const preview = owner === "runAgentPreview" && node.arguments.length === 6 &&
+      // A prévia tem 7 argumentos e continua identificada por POSIÇÃO: o 2º é o
+      // job (`null` = sem job) e o 6º é literalmente `preview`. O 7º (medição de
+      // tempo) entrou DEPOIS desses dois justamente para não mexer neste contrato
+      // — o eixo que o invariante mede é "job operacional × prévia", e ele segue
+      // ancorado em `null` + `preview`, não no número de parâmetros.
+      const preview = owner === "runAgentPreview" && node.arguments.length === 7 &&
         node.arguments[1]?.kind === ts.SyntaxKind.NullKeyword && node.arguments[5]?.getText(ast) === "preview";
       chamadas.push({ tipo: owner === "runAgentTurn" && escoltado ? "operacional" : preview ? "preview" : "sem_escolta", texto: node.getText(ast) });
     }
@@ -315,7 +320,7 @@ function chamadasDoNucleo(texto: string) {
 
 describe("o call site — AST separa prévia sem job do turno operacional escoltado", () => {
   const fonteInbound = readFileSync(INBOUND, "utf8");
-  const ESCOLTADO = "() => executarTurnoDoAgente(deps, job, pool, ctx, input),";
+  const ESCOLTADO = "() => executarTurnoDoAgente(deps, job, pool, ctx, input, undefined, medicao),";
 
   it("há uma única entrada operacional escoltada e uma prévia explicitamente sem job", () => {
     const calls = chamadasDoNucleo(fonteInbound);

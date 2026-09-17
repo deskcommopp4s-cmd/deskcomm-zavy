@@ -106,9 +106,13 @@ async function main(): Promise<void> {
   check(hashA === hashB, `prefixo byte-idêntico entre builds (hash ${hashA.slice(0, 12)}…)`);
 
   console.log(`→ chamada 1 (${MODEL}, esperado: cache WRITE)…`);
+  // `agent_turn` (e não `connection_test`) porque este é o ponto que DECLARA
+  // ferramentas no registro. O seam descarta tools de ponto que não as declara
+  // (`lib/agent-engine/edge/llm/ferramentas-do-ponto.ts`), então um smoke com
+  // `connection_test` pararia de exercitar o breakpoint de cache na última tool.
   const call1 = await runModelCall(db, cfg, {
     tenantId: ORG,
-    purpose: 'connection_test',
+    purpose: 'agent_turn',
     system,
     tools,
     messages: [{ role: 'user', content: 'Olá! Qual o preço do parafuso M3?' }],
@@ -137,7 +141,7 @@ async function main(): Promise<void> {
   console.log(`→ chamada 2 (mesmo prefixo, esperado: cache READ)…`);
   const call2 = await runModelCall(db, cfg, {
     tenantId: ORG,
-    purpose: 'connection_test',
+    purpose: 'agent_turn',
     system,
     tools,
     messages: [{ role: 'user', content: 'E a porca M3, quanto custa?' }],
