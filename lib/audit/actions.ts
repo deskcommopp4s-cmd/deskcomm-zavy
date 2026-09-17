@@ -569,6 +569,11 @@ export const AUDIT_ACTIONS = [
   // Mover um card para OUTRO funil (issue #922) clona o negócio no destino e
   // encerra o original: é a escrita que mexe em DOIS funis de uma vez.
   "lead.moved_to_pipeline",
+  // A chave de IA girada NO LUGAR (PATCH /ai/credentials/:id). Distinto de
+  // `ai.credential_created` e `ai.credential_revalidated`: aqui o id não muda, e
+  // "quando esta chave foi trocada, e por quem" é a pergunta que só esta linha
+  // responde — a coluna `updated_at` se move por qualquer motivo.
+  "ai.credential_updated",
 ] as const;
 
 /** Um código de auditoria. Derivado de `AUDIT_ACTIONS` — não redigite a lista. */
