@@ -85,27 +85,49 @@ export interface MedicaoDeFasesArgs {
 export function criarMedicaoDeFases(args: MedicaoDeFasesArgs): MedicaoDeFases {
   const agora = args.agora ?? Date.now;
   const inicioDoTurno = agora();
-  const inicioDaFase = new Map<FaseDoTurno, number>();
+  // DOIS relógios por fase, e a distinção é o que torna a reabertura correta:
+  //   • `primeiroInicio` — quando a fase apareceu pela 1ª vez no turno. É o que
+  //     `inicioDaFase` responde (quem mede um trecho dentro da fase precisa do
+  //     início dela, não do início da última passagem).
+  //   • `inicioDaPassagem` — quando a passagem CORRENTE começou. É o que fecha
+  //     a janela no próximo `marcar`/`resumo`. Com um mapa só, reabrir uma fase
+  //     faria o fechamento descontar desde a 1ª abertura e contar o intervalo
+  //     duas vezes (medido: `envio` somava 16s onde havia 10s).
+  const primeiroInicio = new Map<FaseDoTurno, number>();
+  const inicioDaPassagem = new Map<FaseDoTurno, number>();
   const encerrada: Partial<Record<FaseDoTurno, number>> = Object.create(null);
   let faseCorrente: FaseDoTurno | null = null;
   let fechada = false;
+
+  /** Soma a passagem corrente de `fase` ao acumulado. Idempotente por chamada. */
+  const fecharPassagem = (fase: FaseDoTurno, t: number): void => {
+    encerrada[fase] = (encerrada[fase] ?? 0) + (t - (inicioDaPassagem.get(fase) ?? t));
+    inicioDaPassagem.delete(fase);
+  };
 
   return {
     marcar: (fase: FaseDoTurno): void => {
       if (fechada) return;
       const t = agora();
-      if (faseCorrente !== null) encerrada[faseCorrente] = t - (inicioDaFase.get(faseCorrente) ?? t);
+      // ACUMULA, não sobrescreve: uma fase pode ser reaberta no mesmo turno. O
+      // caso real é o `envio` — a cadeia `before_send` re-roda quando o
+      // fail-safe de promessa/vocabulário veta, e um turno pode reabrir a fase
+      // mais de uma vez. Sobrescrever perderia as passagens anteriores e a fase
+      // subestimaria justo o turno mais caro; somar é o tempo TOTAL do turno
+      // naquela fase, que é o que o diagnóstico pergunta.
+      if (faseCorrente !== null) fecharPassagem(faseCorrente, t);
       faseCorrente = fase;
-      inicioDaFase.set(fase, t);
+      if (!primeiroInicio.has(fase)) primeiroInicio.set(fase, t);
+      inicioDaPassagem.set(fase, t);
     },
     inicioDaFase: (fase: FaseDoTurno): number | null =>
-      inicioDaFase.has(fase) ? (inicioDaFase.get(fase) as number) : null,
+      primeiroInicio.has(fase) ? (primeiroInicio.get(fase) as number) : null,
     resumo: (): { fases_ms: Partial<Record<FaseDoTurno, number>>; total_ms: number } | null => {
       if (fechada) return null;
       fechada = true;
       const t = agora();
       if (faseCorrente !== null) {
-        encerrada[faseCorrente] = t - (inicioDaFase.get(faseCorrente) ?? t);
+        fecharPassagem(faseCorrente, t);
         faseCorrente = null;
       }
       return { fases_ms: encerrada, total_ms: t - inicioDoTurno };

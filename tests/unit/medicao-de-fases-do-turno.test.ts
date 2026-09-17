@@ -97,6 +97,38 @@ describe("criarMedicaoDeFases", () => {
     expect(medicao.resumo()!.fases_ms.checkpoint).toBe(1_700);
   });
 
+  it("fase REABERTA no mesmo turno ACUMULA — o fail-safe reabre o `envio` de verdade", () => {
+    // A cadeia `before_send` re-roda quando um fail-safe veta (promessa fora de
+    // tabela, vocabulário interno, falso-vazio). O `envio` é reaberto, e
+    // sobrescrever perderia a passagem anterior — a fase subestimaria justo o
+    // turno mais caro, e o diagnóstico apontaria para a fase errada.
+    //
+    // A reabertura é feita com `marcar('envio')` DUAS vezes direto: entre uma
+    // passagem e outra da cadeia não há `marcar` nenhum (a re-execução acontece
+    // dentro do mesmo `execute` da tool), então o que importa é que a soma
+    // inclua as duas janelas em vez de só a última.
+    const relogio = relogioFalso();
+    const medicao = criarMedicaoDeFases({ log: logDeTeste(), agora: relogio.agora });
+    medicao.marcar('envio');
+    relogio.avancar(6_000); // 1ª passagem: espera humana + canal
+    medicao.marcar('envio'); // reabre: o fail-safe re-roda a cadeia
+    relogio.avancar(4_000); // 2ª passagem
+
+    expect(medicao.resumo()!.fases_ms.envio).toBe(10_000); // 6s + 4s, não só os 4s
+  });
+
+  it("reabrir não reescreve o início da fase — `inicioDaFase` responde a 1ª abertura", () => {
+    const relogio = relogioFalso();
+    const medicao = criarMedicaoDeFases({ log: logDeTeste(), agora: relogio.agora });
+    medicao.marcar('envio');
+    const inicio = medicao.inicioDaFase('envio');
+    relogio.avancar(1_000);
+    medicao.marcar('checkpoint');
+    relogio.avancar(500);
+    medicao.marcar('envio');
+    expect(medicao.inicioDaFase('envio')).toBe(inicio);
+  });
+
   it("resumo() é idempotente e não devolve um segundo relatório", () => {
     const medicao = criarMedicaoDeFases({ log: logDeTeste(), agora: relogioFalso().agora });
     medicao.marcar('preparo');
