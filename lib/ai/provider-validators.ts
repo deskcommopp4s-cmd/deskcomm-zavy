@@ -169,6 +169,43 @@ export async function validateOpenRouterKey(apiKey: string): Promise<ValidationR
   }
 }
 
+/**
+ * A DeepSeek é OpenAI-compatível e o `GET /models` dela EXIGE a credencial —
+ * diferente do catálogo público da OpenRouter, que responde 200 para qualquer
+ * string. Uma chamada já prova a chave e devolve o catálogo, então não há o
+ * segundo request que a OpenRouter precisa para a lista.
+ *
+ * ⚠️ Por que a URL canônica fica AQUI e não é derivada de
+ * `aceitaEndpointProprio`/`base_url`: a interface `ProvedorSuportado` carrega
+ * só o BOOLEANO (aceita endpoint próprio), sem guardar endereço, e
+ * `validateProviderKey(provider, apiKey)` não recebe `baseUrl`. Não há de onde
+ * derivar sem mudar a assinatura — que arrastaria os quatro call sites e o
+ * roteiro de endpoint próprio, fora deste escopo. Os outros três validadores já
+ * hardcodam o endpoint de LISTAGEM deles pelo mesmo motivo; o endpoint próprio
+ * é provado pela GERAÇÃO real (`lib/instalacao/prova-de-credito.ts`), não por
+ * esta listagem. A raiz `https://api.deepseek.com` é a documentada pelo
+ * provedor (ele também aceita `/v1`).
+ */
+export async function validateDeepSeekKey(apiKey: string): Promise<ValidationResult> {
+  try {
+    const res = await timedFetch("https://api.deepseek.com/models", {
+      method: "GET",
+      headers: { Authorization: `Bearer ${apiKey}` },
+    });
+    if (res.status === 401 || res.status === 403) {
+      return { ok: false, error: "auth_failed_401" };
+    }
+    if (!res.ok) {
+      return { ok: false, error: `provider_status_${res.status}` };
+    }
+    const json = (await res.json()) as { data?: { id: string }[] };
+    const models = (json.data ?? []).map((m) => m.id).filter(Boolean);
+    return { ok: true, models };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.name : "network_error" };
+  }
+}
+
 export function validateProviderKey(
   provider: Provider,
   apiKey: string,
@@ -182,6 +219,8 @@ export function validateProviderKey(
       return validateGoogleKey(apiKey);
     case "openrouter":
       return validateOpenRouterKey(apiKey);
+    case "deepseek":
+      return validateDeepSeekKey(apiKey);
     default: {
       // Sem `never` aqui: `Provider` agora é derivado de PROVEDORES, e a lista
       // cresce sem que este arquivo saiba. Provedor novo cadastrado antes de
