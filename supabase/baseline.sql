@@ -26609,3 +26609,41 @@ drop trigger if exists trg_platform_meta_app_updated_at on public.platform_meta_
 create trigger trg_platform_meta_app_updated_at
   before update on public.platform_meta_app
   for each row execute function public.fn_set_updated_at();
+
+-- ---- Catálogo da DeepSeek (migration 0265) ----
+--
+-- O próximo provedor que a abertura de vocabulário da 0127 existia para
+-- destravar: OpenAI-compatível e com desconto automático de prefixo de cache.
+-- Ids e preços verificados no provedor (`GET /models`; docs oficiais em dólares
+-- por 1M). Preço em CENTAVOS por milhão — entrada (cache miss) 14, saída 28; o
+-- cache hit (0,28¢/1M) não cabe no integer do catálogo e é desconto de
+-- cobrança, não preço de tabela. `ai_pricing` acompanha para o orçamento somar
+-- com o mesmo número. Sem `is_default_for_provider`: a escolha cai no mais
+-- barato com ferramentas, como na OpenRouter.
+insert into public.ai_models
+  (provider, model_id, display_name, description,
+   input_price_per_million_cents, output_price_per_million_cents, supports_tools)
+values
+  ('deepseek', 'deepseek-flash',  'DeepSeek Flash',
+   'O mais barato da DeepSeek, para atendimento de volume. Tem desconto automático do trecho repetido da conversa.',
+   14, 28, true),
+  ('deepseek', 'deepseek-v4-pro', 'DeepSeek V4 Pro',
+   'O mais capaz da linha v4, para conversas que exigem raciocínio. Também desconta o trecho repetido da conversa.',
+   14, 28, true)
+on conflict (provider, model_id) do update set
+  display_name = excluded.display_name,
+  description = excluded.description,
+  input_price_per_million_cents = excluded.input_price_per_million_cents,
+  output_price_per_million_cents = excluded.output_price_per_million_cents,
+  supports_tools = excluded.supports_tools;
+
+insert into public.ai_pricing
+  (model, prompt_cents_per_million_tokens, completion_cents_per_million_tokens, notes)
+values
+  ('deepseek-flash',   14, 28, 'catálogo 0265 — cache hit 0,28¢/1M não cabe no catálogo'),
+  ('deepseek-v4-pro',  14, 28, 'catálogo 0265 — cache hit 0,28¢/1M não cabe no catálogo')
+on conflict (model) do update set
+  prompt_cents_per_million_tokens = excluded.prompt_cents_per_million_tokens,
+  completion_cents_per_million_tokens = excluded.completion_cents_per_million_tokens,
+  notes = excluded.notes,
+  superseded_at = null;

@@ -44,6 +44,13 @@ const GOOGLE_ENDPOINT = 'https://generativelanguage.googleapis.com';
 export const OPENROUTER_ENDPOINT = 'https://openrouter.ai/api/v1';
 
 /**
+ * A DeepSeek também fala a API da OpenAI — mesma fábrica, mesmo formato de
+ * payload, sem SDK novo. O endpoint é a raiz que o provedor documenta (ele
+ * também aceita `/v1`); o `@ai-sdk/openai` acrescenta `/chat/completions`.
+ */
+export const DEEPSEEK_ENDPOINT = 'https://api.deepseek.com';
+
+/**
  * Cabeçalhos OPCIONAIS de atribuição da OpenRouter.
  *
  * A doc deles chama `HTTP-Referer` e `X-Title` de "optional headers to identify
@@ -111,6 +118,16 @@ export function createDefaultRegistry(opts?: { allowedHosts?: string[] }): Provi
         headers: cabecalhosDeAtribuicaoOpenRouter(),
         fetch: contain(endpoint),
       })(modelId);
+    },
+    /**
+     * DeepSeek é OpenAI-compatível e aceita um `base_url` próprio pela mesma
+     * razão da OpenRouter: o painel de provedores oferece apontar para um
+     * gateway, e a allowlist do egress precisa ser a DELE — fixá-la no endpoint
+     * canônico bloquearia a configuração que a própria tela permitiu.
+     */
+    deepseek: (apiKey, modelId, baseUrl) => {
+      const endpoint = baseUrl ?? DEEPSEEK_ENDPOINT;
+      return createOpenAI({ apiKey, baseURL: endpoint, fetch: contain(endpoint) })(modelId);
     },
   };
 }
