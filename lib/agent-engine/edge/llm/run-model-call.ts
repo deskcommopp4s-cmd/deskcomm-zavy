@@ -310,7 +310,9 @@ async function aplicarOrcamento(d: {
 }
 
 export async function runModelCall(db: pg.Pool, cfg: LlmEdgeConfig, input: RunModelCallInput, deps: RunModelCallDeps = {}) {
-  const registry = deps.registry ?? createDefaultRegistry();
+  // O knob do raciocínio da DeepSeek entra pela fábrica: `deepseekThinking` só é
+  // lido pela fábrica `deepseek`, então os outros provedores não têm como mudar.
+  const registry = deps.registry ?? createDefaultRegistry({ deepseekThinking: cfg.deepseekThinking });
   const purpose = input.purpose ?? 'agent_turn';
 
   // A config da org é lida ANTES da decisão porque o resolvedor precisa dela
