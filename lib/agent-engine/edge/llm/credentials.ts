@@ -26,6 +26,7 @@ import {
   type ChaveDeOrcamento,
   type ModoDeOrcamento,
 } from './orcamento';
+import type { RaciocinioDeepseek } from './providers';
 import type { CacheTtl } from './stable-prefix';
 
 /** Config da camada LLM montada do env validado (padrão crmEdgeConfigFromEnv). */
@@ -54,6 +55,12 @@ export interface LlmEdgeConfig {
    * monta a config na mão (testes) — o seam aplica a doutrina '1h' quando ausente.
    */
   cacheTtl?: CacheTtl;
+  /**
+   * Toggle do raciocínio (thinking) da DeepSeek — knob DEEPSEEK_THINKING.
+   * Ausente = `'provider'`: o provedor decide (raciocínio LIGADO). Só a
+   * DeepSeek lê este valor; os outros provedores não passam por essa fábrica.
+   */
+  deepseekThinking?: RaciocinioDeepseek;
   /**
    * `AI_BUDGET_ENFORCEMENT` já normalizado — o kill switch do operador da
    * instalação. Ausente = `'on'`, e `'on'` NÃO LIGA NADA: significa apenas
@@ -85,16 +92,22 @@ export function llmEdgeConfigFromEnv(env: {
   OPENROUTER_API_KEY?: string;
   LLM_CACHE_TTL?: string;
   AI_BUDGET_ENFORCEMENT?: string;
+  DEEPSEEK_THINKING?: string;
 }): LlmEdgeConfig {
   const ttl = env.LLM_CACHE_TTL ?? '1h';
   if (ttl !== '5m' && ttl !== '1h') {
     throw new Error("LLM_CACHE_TTL inválido — use '5m' ou '1h' (default 1h)");
+  }
+  const raciocinio = env.DEEPSEEK_THINKING ?? 'provider';
+  if (raciocinio !== 'provider' && raciocinio !== 'disabled') {
+    throw new Error("DEEPSEEK_THINKING inválido — use 'provider' ou 'disabled' (default provider)");
   }
   return {
     ...(env.ANTHROPIC_API_KEY ? { anthropicApiKey: env.ANTHROPIC_API_KEY } : {}),
     ...(env.OPENAI_API_KEY ? { openaiApiKey: env.OPENAI_API_KEY } : {}),
     ...(env.OPENROUTER_API_KEY ? { openrouterApiKey: env.OPENROUTER_API_KEY } : {}),
     cacheTtl: ttl,
+    deepseekThinking: raciocinio,
     // Sem `if` de valor vazio, ao contrário das chaves acima: aqui o ausente
     // TEM um significado ('on'), e o normalizador é quem o dá. Um campo
     // opcional que some faria o seam ter de repetir o default, e dois defaults
