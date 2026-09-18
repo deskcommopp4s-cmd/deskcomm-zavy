@@ -492,6 +492,71 @@ export async function loadInboundBodyForJob(
   return row === undefined ? null : corpoDaMensagem(row);
 }
 
+/**
+ * O id da inbound MAIS RECENTE da conversa — a testemunha de "chegou mensagem
+ * nova" enquanto um turno roda.
+ *
+ * Mesma ordenação do anti-backlog do drain (`drain.ts`): `coalesce(sent_at,
+ * created_at)` com desempate por `created_at`/`id`. `id` é uuid ALEATÓRIO e não
+ * pode desempatar sozinho — dois inbound com o mesmo `sent_at` (relógio do
+ * provider repetido) fariam "a mais recente" sair por sorteio, e a absorção
+ * compararia contra uma testemunha errada.
+ *
+ * Ela é lida UMA vez por turno, junto da abertura: o turno guarda o id que
+ * aquele contexto já contém. Quando o `send_message` consulta de novo e o id
+ * mudou, a mensagem que chegou no meio do processamento entra no mesmo turno —
+ * é a janela do "debounce absorvente" (`INBOUND_DEBOUNCE_MS=0`).
+ */
+export async function inboundMaisRecenteId(
+  db: Queryable,
+  input: { tenantId: string; conversationId: string },
+): Promise<string | null> {
+  const { rows } = await db.query<{ id: string }>(
+    `select id from messages
+      where organization_id = $1 and conversation_id = $2 and direction = 'inbound'
+      order by coalesce(sent_at, created_at) desc, created_at desc, id desc
+      limit 1`,
+    [input.tenantId, input.conversationId],
+  );
+  return rows[0]?.id ?? null;
+}
+
+/**
+ * A mensagem que disparou o job JÁ tem resposta nossa depois dela?
+ *
+ * É a marca do "já respondido" que faz o job duplicado encerrar sem gastar. Com
+ * o caminho absorvente (`INBOUND_DEBOUNCE_MS=0`) o drain deixa de ser a âncora
+ * da coalescência: o turno começa no mesmo instante e a mensagem que chega
+ * durante ele é absorvida PELO PRÓPRIO TURNO. Se, por corrida, um 2º job
+ * nascer para essa mesma janela, ele encontra aqui a resposta que o primeiro já
+ * deu — e a segunda resposta picada (o defeito) não acontece.
+ *
+ * A comparação é de RECÊNCIA, nunca de existência: uma outbound anterior à
+ * mensagem do job é resposta a um inbound PASSADO e não pode calar esta. Sem
+ * outbound posterior, o turno roda normal — inclusive quando a mensagem chegou
+ * depois de a resposta anterior ter saído, que é o 2º turno aceito.
+ */
+export async function inboundJaRespondido(
+  db: Queryable,
+  input: { tenantId: string; conversationId: string; inboundMessageId: string },
+): Promise<boolean> {
+  const { rows } = await db.query<{ respondido: boolean }>(
+    `select exists (
+       select 1 from messages t
+        where t.organization_id = $1 and t.conversation_id = $2
+          and t.id = $3 and t.direction = 'inbound'
+          and exists (
+            select 1 from messages o
+             where o.organization_id = $1 and o.conversation_id = $2
+               and o.direction = 'outbound'
+               and coalesce(o.sent_at, o.created_at) > coalesce(t.sent_at, t.created_at)
+          )
+     ) as respondido`,
+    [input.tenantId, input.conversationId, input.inboundMessageId],
+  );
+  return rows[0]?.respondido === true;
+}
+
 /** Conteúdo do checkpoint — o modelo devolve, o Zod valida, o Postgres guarda. */
 export const checkpointContentSchema = z.object({
   commitments: z.array(z.string()).default([]),
@@ -1094,6 +1159,16 @@ export interface InboundTurnKnobs {
    * gate: uma linha de log por turno é barata, cegueira não.
    */
   medirTempo?: boolean;
+  /**
+   * DEBOUNCE ABSORVENTE (`INBOUND_DEBOUNCE_MS=0`): o turno começa já e usa o
+   * próprio tempo de processamento como janela — a mensagem que chega durante
+   * ele é absorvida pelo mesmo turno, e o job duplicado encerra por já ter
+   * resposta. Ausente/false = o turno NEM CONSULTA a recência (comportamento
+   * antigo intacto, zero query a mais); main.ts preenche com
+   * `env.INBOUND_DEBOUNCE_MS === 0`, de modo que a semântica do `.env` vale
+   * igual para o drain (que enfileira para agora) e para o turno (que absorve).
+   */
+  absorverRajada?: boolean;
 }
 
 /** Default de `allowlistTtlMs` (21 dias) para testes que omitem o knob. */
@@ -2128,6 +2203,53 @@ async function executarTurnoDoAgente(
           inboundMessageId: input.inboundMessageId,
         });
 
+  // ── O TURNO ABSORVENTE (INBOUND_DEBOUNCE_MS=0) ─────────────────────────────
+  //
+  // A espera morta de 8s existia para o turno já nascer com a rajada inteira.
+  // No caminho novo o turno começa JÁ e usa o próprio tempo de processamento
+  // como janela: a mensagem que chega durante ele é absorvida pelo mesmo turno
+  // (ver `absorverMensagemNova`, chamada no primeiro `send_message`).
+  //
+  // Isto aqui é o OUTRO lado da mesma moeda — o job duplicado. Como o drain
+  // deixa de ancorar num job PENDING futuro quando o debounce é 0, uma mensagem
+  // que chega no instante da corrida pode gerar um 2º job; ele NÃO pode virar
+  // uma segunda resposta picada. `inboundJaRespondido` é a marca durável (a
+  // outbound que o primeiro turno já gravou) que encerra o duplicado sem gastar.
+  if (
+    !preview &&
+    deps.knobs.absorverRajada === true &&
+    liveJob().kind === 'inbound_turn' &&
+    input.inboundMessageId !== undefined
+  ) {
+    const jaRespondido = await inboundJaRespondido(pool, {
+      tenantId,
+      conversationId: input.conversationId,
+      inboundMessageId: input.inboundMessageId,
+    });
+    if (jaRespondido) {
+      runLog.info('turno pulado — a mensagem do job já foi respondida por outro turno', {
+        kind: liveJob().kind,
+      });
+      return;
+    }
+  }
+  // A testemunha da recência, tirada junto da abertura: é contra ela que a
+  // absorção compara para saber se chegou mensagem nova no meio do turno. Ela
+  // vem do BANCO, não do `inbound_message_id`, porque o contexto lido acima
+  // pode já conter uma mensagem mais nova que o job — e aí não há o que
+  // absorver (o turno já a tem).
+  let vistoInboundId =
+    preview || deps.knobs.absorverRajada !== true || liveJob().kind !== 'inbound_turn'
+      ? null
+      : await inboundMaisRecenteId(pool, {
+          tenantId,
+          conversationId: input.conversationId,
+        });
+  // Ligado quando a absorção encontra pedido de humano/opt-out e o turno já
+  // avisou+silenciou. Depois disto, nenhuma mensagem sai (e o modelo é
+  // instruído a encerrar) — o turno termina depois da chamada de modelo.
+  let turnoEncerradoPorPadrao = false;
+
   // Seam de canal (F2-25): o envio vai SÓ pela interface ChannelAdapter — o
   // default WAHA-via-CRM envolve o sink F2-06. Instanciado por job (o pool é
   // per-job neste codebase); trocar o adapter não muda nada abaixo.
@@ -2202,47 +2324,45 @@ async function executarTurnoDoAgente(
   const mensagemDoJob =
     currentInboundText ?? latestInboundSignal(openingContext.context.messages);
   const inboundsPendentes = inboundsNaoRespondidos(openingContext.context.messages);
-  if (
-    !preview &&
-    inboundsPendentes.some(
-      (texto) =>
-        detectHumanHandoffRequest(texto) ||
-        (agentConfig !== null && matchesHandoffKeyword(texto, agentConfig.handoffKeywords)),
-    )
-  ) {
-    const aviso = await avisarLeadDaEscalacao(pool, avisoDaEscalacao().ids, {
-      ...avisoDaEscalacao().base,
-      motivo: 'pediu_humano',
-    });
-    await performHumanHandoff(
-      pool,
-      { tenantId, leadId, conversationId: input.conversationId },
-      {
-        reason: 'requested_human',
-        conversationSummary: buildHandoffSummary(previous),
-        avisoAoLead: aviso,
-        log: runLog,
-      },
-    );
-    runLog.info('handoff humano acionado por pedido explícito do lead (detecção determinística)', {
-      kind: liveJob().kind,
-      lead_avisado: aviso.avisado,
-    });
-    return; // bot silencia: o aviso já saiu, e nada mais sai neste turno
-  }
 
-  // F4-07: STOP AMBÍGUO ("para de me mandar isso", "não quero mais receber", "me tira da
-  // lista", ou a palavra-chave STOP/PARAR/SAIR sozinha). Detecção CONSERVADORA — na dúvida
-  // é STOP: o bot silencia JÁ (sem LLM, sem envio) via o MESMO mecanismo durável do handoff
-  // (bot_silenced_until='infinity', que SOBREVIVE à leitura do CRM que sobrescreve o cache
-  // is_opted_out) e escala à inbox para o humano confirmar o opt-out real (is_blocked) no
-  // CRM. Cancela os follow-ups agendados de tabela. Nada disso reverte (regra dura nº 2).
-  if (!preview && inboundsPendentes.some((texto) => detectAmbiguousOptOut(texto))) {
-    // O aviso daqui NÃO fala em atendente — quem pediu para parar não quer ouvir
-    // sobre atendimento (`textoDoAviso`, motivo `suspeita_de_opt_out`). Ele
-    // CONFIRMA a parada, que é o padrão de mensageria para um opt-out, e diz que
-    // uma pessoa vai conferir. Sair calado deixaria a pessoa sem saber se o
-    // pedido dela foi ouvido — e ela pediu justamente para ser ouvida.
+  /**
+   * O AVISO-E-SILÊNCIA de um padrão determinístico — fonte ÚNICA, porque agora
+   * há dois portões que o disparam: o topo do turno (F4-06/F4-07) e a absorção
+   * de uma mensagem que chega DURANTE o processamento. Duas cópias divergiriam
+   * no motivo e no texto do aviso, e o dia da divergência é o dia em que um dos
+   * dois caminhos cala o lead sem confirmar.
+   *
+   * AVISA e SÓ ENTÃO silencia (a nota de ORDEM do gate abaixo vale aqui):
+   * `performHumanHandoff` grava `force_human`, e o `stopGate` da cadeia lê essa
+   * trava a cada tentativa de envio — avisar depois seria avisar ninguém.
+   */
+  const acionarHandoffDeterministico = async (
+    motivo: 'pediu_humano' | 'suspeita_de_opt_out',
+  ): Promise<void> => {
+    if (motivo === 'pediu_humano') {
+      const aviso = await avisarLeadDaEscalacao(pool, avisoDaEscalacao().ids, {
+        ...avisoDaEscalacao().base,
+        motivo: 'pediu_humano',
+      });
+      await performHumanHandoff(
+        pool,
+        { tenantId, leadId, conversationId: input.conversationId },
+        {
+          reason: 'requested_human',
+          conversationSummary: buildHandoffSummary(previous),
+          avisoAoLead: aviso,
+          log: runLog,
+        },
+      );
+      runLog.info('handoff humano acionado por pedido explícito do lead (detecção determinística)', {
+        kind: liveJob().kind,
+        lead_avisado: aviso.avisado,
+      });
+      return;
+    }
+    // O aviso de opt-out NÃO fala em atendente — quem pediu para parar não quer
+    // ouvir sobre atendimento. Ele CONFIRMA a parada e diz que uma pessoa vai
+    // conferir; sair calado deixaria a pessoa sem saber se o pedido foi ouvido.
     const aviso = await avisarLeadDaEscalacao(pool, avisoDaEscalacao().ids, {
       ...avisoDaEscalacao().base,
       motivo: 'suspeita_de_opt_out',
@@ -2262,8 +2382,96 @@ async function executarTurnoDoAgente(
       kind: liveJob().kind,
       lead_avisado: aviso.avisado,
     });
+  };
+
+  if (
+    !preview &&
+    inboundsPendentes.some(
+      (texto) =>
+        detectHumanHandoffRequest(texto) ||
+        (agentConfig !== null && matchesHandoffKeyword(texto, agentConfig.handoffKeywords)),
+    )
+  ) {
+    await acionarHandoffDeterministico('pediu_humano');
+    return; // bot silencia: o aviso já saiu, e nada mais sai neste turno
+  }
+
+  // F4-07: STOP AMBÍGUO ("para de me mandar isso", "não quero mais receber", "me tira da
+  // lista", ou a palavra-chave STOP/PARAR/SAIR sozinha). Detecção CONSERVADORA — na dúvida
+  // é STOP: o bot silencia JÁ (sem LLM, sem envio) via o MESMO mecanismo durável do handoff
+  // (bot_silenced_until='infinity', que SOBREVIVE à leitura do CRM que sobrescreve o cache
+  // is_opted_out) e escala à inbox para o humano confirmar o opt-out real (is_blocked) no
+  // CRM. Cancela os follow-ups agendados de tabela. Nada disso reverte (regra dura nº 2).
+  if (!preview && inboundsPendentes.some((texto) => detectAmbiguousOptOut(texto))) {
+    await acionarHandoffDeterministico('suspeita_de_opt_out');
     return; // bot silencia: a confirmação já saiu, e nada mais sai neste turno
   }
+
+  /**
+   * MENSAGEM QUE CHEGA DURANTE O TURNO — ABSORVIDA, NÃO IGNORADA.
+   *
+   * No caminho absorvente (`INBOUND_DEBOUNCE_MS=0`) o drain não cria um job
+   * futuro para a mensagem que chega no meio do processamento; o próprio turno
+   * é a janela. Esta função é o ponto em que ele percebe e reage, chamada no
+   * PRIMEIRO `send_message` (antes de qualquer byte sair):
+   *
+   *   • `segue`    — a conversa não mudou desde a abertura;
+   *   • `avisar`   — chegou mensagem nova; nenhum envio acontece AGORA e o
+   *                  modelo recebe o erro instrutivo que o manda reler com
+   *                  `get_lead_context` e responder ao CONJUNTO numa resposta só
+   *                  (nada é emendado por nós — a detecção de opt-out continua
+   *                  por mensagem, exigindo a mensagem inteira);
+   *   • `encerrado`— a mensagem nova era pedido de humano/opt-out: o aviso saiu,
+   *                  o bot silenciou, e o turno termina sem responder.
+   *
+   * Os detectores rodam de NOVO sobre os inbounds pendentes relidos: um "PARAR"
+   * que chegou depois da abertura precisa ser ouvido ANTES de o modelo falar —
+   * senão a IA responde por cima de um pedido de silêncio, que é o pior desfecho
+   * possível. Um erro de releitura NÃO absorve (`segue`): o turno não pode
+   * travar por uma leitura que falhou; a mensagem nova vira o próximo turno.
+   */
+  const absorverMensagemNova = async (): Promise<'segue' | 'avisar' | 'encerrado'> => {
+    if (preview || deps.knobs.absorverRajada !== true || liveJob().kind !== 'inbound_turn') {
+      return 'segue';
+    }
+    const atual = await inboundMaisRecenteId(pool, {
+      tenantId,
+      conversationId: input.conversationId,
+    });
+    if (atual === null || atual === vistoInboundId) return 'segue';
+    vistoInboundId = atual;
+    const releitura = await getLeadContext(
+      pool,
+      deps.crmCfg,
+      { tenantId, leadId, conversationId: input.conversationId, fuso: fusoDaOrg },
+      turnContextKnobs,
+    );
+    if (!releitura.ok) {
+      runLog.warn('absorção: releitura do contexto falhou — a mensagem nova vira o próximo turno', {
+        error: releitura.error.code,
+      });
+      return 'segue';
+    }
+    const novosPendentes = inboundsNaoRespondidos(releitura.context.messages);
+    if (
+      novosPendentes.some(
+        (texto) =>
+          detectHumanHandoffRequest(texto) ||
+          (agentConfig !== null && matchesHandoffKeyword(texto, agentConfig.handoffKeywords)),
+      )
+    ) {
+      await acionarHandoffDeterministico('pediu_humano');
+      return 'encerrado';
+    }
+    if (novosPendentes.some((texto) => detectAmbiguousOptOut(texto))) {
+      await acionarHandoffDeterministico('suspeita_de_opt_out');
+      return 'encerrado';
+    }
+    runLog.info('mensagem nova absorvida no turno — o modelo vai reler antes de responder', {
+      kind: liveJob().kind,
+    });
+    return 'avisar';
+  };
 
   // F3-07: compaction + flush pré-compaction. Quando o histórico cresce além do limiar,
   // o FLUSH grava as notas duráveis (lead_notes) e a compaction resume a conversa com o
@@ -2600,6 +2808,17 @@ async function executarTurnoDoAgente(
     send_template: tool({
       ...AGENT_TOOL_DEFS.send_template,
       execute: async ({ template_name, language, values }) => {
+        // Mesmo veto do `send_message`: um turno encerrado por padrão
+        // determinístico não fala mais, seja por texto ou por template.
+        if (turnoEncerradoPorPadrao) {
+          return {
+            ok: false,
+            error: {
+              code: 'turno_encerrado',
+              message: 'o turno foi encerrado — não envie mais nada e finalize.',
+            },
+          };
+        }
         if (seq >= maxSendsPerTurn) {
           return {
             ok: false,
@@ -2756,6 +2975,46 @@ async function executarTurnoDoAgente(
     send_message: tool({
       ...AGENT_TOOL_DEFS.send_message,
       execute: async ({ body }) => {
+        // O turno já silenciou por um padrão determinístico achado na absorção:
+        // nada mais sai, nem uma segunda tentativa do modelo.
+        if (turnoEncerradoPorPadrao) {
+          return {
+            ok: false,
+            error: {
+              code: 'turno_encerrado',
+              message: 'o turno foi encerrado — não envie mais nada e finalize.',
+            },
+          };
+        }
+        // ANTES de qualquer gate: chegou mensagem nova durante o processamento?
+        // Só a PRIMEIRA tentativa de envio absorve — depois de uma resposta já
+        // ter saído, o que chegar vira um 2º turno normal (não há como cancelar
+        // o que saiu).
+        if (seq === 0) {
+          const absorcao = await absorverMensagemNova();
+          if (absorcao === 'encerrado') {
+            turnoEncerradoPorPadrao = true;
+            return {
+              ok: false,
+              error: {
+                code: 'turno_encerrado',
+                message: 'o turno foi encerrado — não envie mais nada e finalize.',
+              },
+            };
+          }
+          if (absorcao === 'avisar') {
+            return {
+              ok: false,
+              error: {
+                code: 'novas_mensagens_durante_o_turno',
+                message:
+                  'O cliente escreveu de novo enquanto você preparava a resposta. Chame ' +
+                  'get_lead_context para reler a conversa E responda ao conjunto das mensagens ' +
+                  'dele numa única resposta — não responda só à primeira.',
+              },
+            };
+          }
+        }
         if (claimsCurrentInboundIsEmpty(body, mensagemDoJob)) {
           falseEmptyInboundVetoCount += 1;
           if (falseEmptyInboundVetoCount < MAX_VETOS_DE_FALSO_VAZIO) {
@@ -3926,6 +4185,17 @@ async function executarTurnoDoAgente(
     // retaguarda e vem depois, na fase dele.
     fecharMedicaoDeFases(medicaoDoTurno ?? null, runLog);
     digitando?.parar();
+
+    // A absorção encontrou pedido de humano/opt-out numa mensagem que chegou no
+    // meio do turno: o aviso já saiu e o bot já silenciou. Não há resposta a dar
+    // nem checkpoint a fechar por cima de um pedido de silêncio — encerrar AQUI
+    // é o mesmo desfecho dos gates determinísticos do topo do turno.
+    if (turnoEncerradoPorPadrao) {
+      runLog.info('turno encerrado — padrão determinístico detectado na absorção', {
+        kind: liveJob().kind,
+      });
+      return;
+    }
 
     // F4-04: correlação dos dois sinais do MESMO turno — jailbreak ALTO + tentativa de
     // promessa fora de tabela (F4-01). Ambos estão determinados aqui (o jailbreak rodou na

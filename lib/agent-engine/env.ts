@@ -123,8 +123,19 @@ const envSchema = z.object({
   EVENT_LOG_DRAIN_INTERVAL_MS: z.coerce.number().int().positive().default(2_000),
   EVENT_LOG_DRAIN_IDLE_INTERVAL_MS: z.coerce.number().int().positive().default(10_000),
   EVENT_LOG_DRAIN_BATCH_SIZE: z.coerce.number().int().positive().default(50),
-  // Coalescência de rajada inbound: mensagens do MESMO contato dentro desta
-  // janela viram UM job (responder em rajada é gatilho de ban). 0 = sem debounce.
+  // Janela de coalescência de rajada inbound. DUAS semânticas:
+  //
+  //   > 0 (default 8_000, comportamento antigo) — o turno ESPERA esta janela
+  //       antes de começar, para nascer com a rajada inteira. Mensagem do mesmo
+  //       contato dentro da janela entra de carona no mesmo job (responder em
+  //       rajada é gatilho de ban).
+  //   0 — DEBOUNCE ABSORVENTE: o turno começa JÁ e usa o próprio tempo de
+  //       processamento como janela. A mensagem que chega DURANTE o turno é
+  //       absorvida por ele (o modelo relê e responde ao conjunto numa resposta
+  //       só) e o job duplicado que nascer encontra a resposta já dada e encerra
+  //       sem gastar. A espera morta de 8s por mensagem deixa de existir.
+  //
+  // O default NÃO muda: o caminho novo é opt-in explícito no .env.
   INBOUND_DEBOUNCE_MS: z.coerce.number().int().min(0).default(8_000),
   // Circuito de saúde do número — ritmo do ticker (block/response rate por número).
   NUMBER_HEALTH_INTERVAL_MS: z.coerce.number().int().positive().default(300_000),
