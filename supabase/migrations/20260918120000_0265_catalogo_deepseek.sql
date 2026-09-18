@@ -48,7 +48,7 @@ values
    14, 28, true),
   ('deepseek', 'deepseek-v4-pro', 'DeepSeek V4 Pro',
    'O mais capaz da linha v4, para conversas que exigem raciocínio. Também desconta o trecho repetido da conversa.',
-   14, 28, true)
+   44, 87, true)
 on conflict (provider, model_id) do update set
   display_name = excluded.display_name,
   description = excluded.description,
@@ -65,7 +65,7 @@ insert into public.ai_pricing
   (model, prompt_cents_per_million_tokens, completion_cents_per_million_tokens, notes)
 values
   ('deepseek-flash',   14, 28, 'catálogo 0265 — cache hit 0,28¢/1M não cabe no catálogo'),
-  ('deepseek-v4-pro',  14, 28, 'catálogo 0265 — cache hit 0,28¢/1M não cabe no catálogo')
+  ('deepseek-v4-pro',  44, 87, 'catálogo 0265 — cache hit 0,28¢/1M não cabe no catálogo')
 on conflict (model) do update set
   prompt_cents_per_million_tokens = excluded.prompt_cents_per_million_tokens,
   completion_cents_per_million_tokens = excluded.completion_cents_per_million_tokens,
