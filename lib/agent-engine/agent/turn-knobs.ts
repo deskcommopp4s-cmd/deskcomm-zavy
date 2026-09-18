@@ -50,5 +50,11 @@ export function turnKnobsFromEnv(env: Env): InboundTurnKnobs {
     },
     allowlistTtlMs: env.AI_ALLOWLIST_TTL_DAYS * 24 * 60 * 60 * 1000,
     medirTempo: env.AGENT_TURN_TIMING,
+    // O caminho absorvente é a MESMA chave que o drain lê: `0` faz o drain
+    // enfileirar para agora e o turno absorver o que chegar durante ele. As
+    // duas pontas têm de sair do mesmo valor — separá-las criaria o estado
+    // incoerente em que o turno espera 8s mas não coalesce, ou começa já e cria
+    // um job duplicado para cada mensagem da rajada.
+    absorverRajada: env.INBOUND_DEBOUNCE_MS === 0,
   };
 }
