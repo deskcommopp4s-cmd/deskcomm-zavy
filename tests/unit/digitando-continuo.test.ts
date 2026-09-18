@@ -178,7 +178,10 @@ describe("fiação — o 'digitando' do turno sempre apaga", () => {
   it("para em `antesDaPrimeira` ANTES de o `esperarComoHumano` sinalizar", () => {
     const i = FONTE_INBOUND.indexOf("antesDaPrimeira: async (primeiraBolha: string)");
     expect(i).toBeGreaterThan(-1);
-    const janela = FONTE_INBOUND.slice(i, i + 1200);
+    // A janela cobre o ramo SOBREPOSTO (a pausa iniciada antes da cadeia, que
+    // antecede o fallback) — foi de 1200 para 2000 quando a sobreposição entrou.
+    // O que o teste prende não mudou: `parar()` antes de `esperarComoHumano`.
+    const janela = FONTE_INBOUND.slice(i, i + 2000);
     const parada = janela.indexOf("digitando?.parar();");
     const reacende = janela.indexOf("esperarComoHumano({");
     expect(parada).toBeGreaterThan(-1);

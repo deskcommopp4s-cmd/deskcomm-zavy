@@ -160,7 +160,8 @@ import {
   fecharMedicaoDeFases,
   type MedicaoDeFases,
 } from './medicao-de-fases';
-import { sendInBubbles } from './split-message';
+import { sendInBubbles, splitIntoBubbles } from './split-message';
+import { iniciarEsperaSobreposta, type EsperaSobreposta } from './espera-sobreposta';
 import type { DisclosureMode } from '../guardrails/disclosure/template';
 import { decidePromise } from '../guardrails/promise/engine';
 import { loadPromiseTable } from '../guardrails/promise/table';
@@ -2811,6 +2812,19 @@ async function executarTurnoDoAgente(
             agentConfig?.casesEnabled === true
               ? await hasOpenCaseForContact(pool, tenantId, input.conversationId)
               : false;
+          // A espera humana SOBREPOSTA à cadeia (ver `espera-sobreposta.ts`): começa
+          // no prelúdio do envio, em paralelo com os gates, e o envio só sai quando
+          // as DUAS terminam. O holder é mutável porque `send`/`antesDaPrimeira`
+          // (dentro do `beforeSendArgs` abaixo) o leem por closure. Criado UMA vez
+          // por turno e reusado no re-run do fail-safe — daí o flag
+          // `jaEsperouComoHumano`, que impede uma segunda pausa pelo mesmo turno.
+          let esperaSobreposta: EsperaSobreposta | null = null;
+          // A pausa EFETIVA do envio corrente (ms), capturada por `antesDaPrimeira`
+          // quando a pausa sobreposta é consumida. Fica fora do objeto
+          // `esperaSobreposta` porque a medição do envio (`onEsperaHumana`) roda
+          // DEPOIS da pausa e precisa saber que esta pausa pertence a ESTE envio —
+          // numa 2ª mensagem do turno o objeto já teria o intervalo da 1ª.
+          let esperaDoEnvioMs: number | null = null;
           // Args reusados EXATAMENTE (mesmo objeto) no re-run do fail-safe abaixo — só
           // hasOpenCase/openedCaseThisTurn mudam depois do auto-abre-caso.
           const beforeSendArgs = {
@@ -2880,13 +2894,17 @@ async function executarTurnoDoAgente(
                 // cabeçalho de `split-message.ts`.
                 agora: () => Date.now(),
                 onEsperaHumana: (inicioMs, fimMs) => {
-                  if (inicioMs === null || fimMs === null) return;
-                  // A `envio` abre no INSTANTE em que o turno passa a falar com o
-                  // lead — e não antes, porque a chamada principal é quem executa
-                  // esta tool, e marcá-la antes colocaria o modelo inteiro dentro
-                  // do envio.
-                  medicaoDoTurno?.marcar('envio');
-                  runLog.info('espera humana medida', { espera_humana_ms: fimMs - inicioMs });
+                  // A pausa SOBREPOSTA é medida no prelúdio (antes da cadeia), e o
+                  // par que o `sendInBubbles` mede aqui é só o RESTO dela. Quando a
+                  // pausa foi consumida, o número verdadeiro chega por
+                  // `esperaDoEnvioMs`; sem sobreposição, o par dele já é o intervalo.
+                  const ms =
+                    esperaDoEnvioMs ??
+                    (inicioMs !== null && fimMs !== null ? fimMs - inicioMs : null);
+                  if (ms === null) return;
+                  runLog.info('espera humana medida', { espera_humana_ms: ms });
+                  // Consumido: a 2ª mensagem do turno não rouba o número da 1ª.
+                  esperaDoEnvioMs = null;
                 },
                 // ANTES da 1ª bolha: "digitando…" + espera proporcional ao texto.
                 // É o conserto do "responde rápido demais" (ver atraso-humano.ts).
@@ -2897,6 +2915,16 @@ async function executarTurnoDoAgente(
                 antesDaPrimeira: async (primeiraBolha: string): Promise<void> => {
                   if (jaEsperouComoHumano) return;
                   jaEsperouComoHumano = true;
+                  // Caminho SOBREPOSTO: a pausa já corre desde antes da cadeia.
+                  // `aguardar` só garante que ela não ENCURTOU para o texto final
+                  // (o disclosureGate pode prepend-lo). O `digitando` já foi
+                  // apagado e reaceso no prelúdio — reacender aqui duplicaria.
+                  if (esperaSobreposta !== null) {
+                    const ms = await esperaSobreposta.aguardar(primeiraBolha);
+                    esperaDoEnvioMs = ms;
+                    runLog.info('atraso humano antes da 1ª bolha', { atraso_ms: ms });
+                    return;
+                  }
                   // O batimento para ANTES da sinalização do `esperarComoHumano`:
                   // os dois acendem o MESMO "digitando", e mantê-los vivos juntos
                   // dispararia presença duplicada. A luz não pisca — a chamada
@@ -2936,6 +2964,46 @@ async function executarTurnoDoAgente(
                 },
               }),
           };
+          // A fase `envio` abre AQUI: é o instante em que o turno passa a tentar
+          // falar com o lead — a partir daqui correm a pausa humana e a cadeia de
+          // gates. (Antes, ela abria no FIM da pausa, o que deixava de fora a
+          // própria pausa e os gates; o comentário do fechamento, ~3860, dizia o
+          // contrário do que o código fazia.)
+          if (!preview) medicaoDoTurno?.marcar('envio');
+          // A sobreposição começa AQUI, imediatamente antes da cadeia: a pausa
+          // humana não depende de nenhum veredito de gate (só do texto), então
+          // pode correr junto. `jaEsperouComoHumano` garante a pausa única por
+          // turno; `esperaSobreposta === null` garante que ela só se inicia na
+          // 1ª tentativa de envio do turno.
+          if (!preview && !jaEsperouComoHumano && esperaSobreposta === null) {
+            const splitAtivo = agentConfig?.splitMessages ?? false;
+            const maxChars = agentConfig?.splitMaxChars ?? 600;
+            // O texto que dimensiona a pausa é a 1ª BOLHA (não o corpo inteiro):
+            // é ela que aparece primeiro no aparelho. Mesmo recorte que o
+            // `sendInBubbles` fará — daí reusar `splitIntoBubbles`.
+            const primeiraBolhaCandidata = splitAtivo
+              ? (splitIntoBubbles(body, maxChars)[0] ?? body)
+              : body;
+            const canalDaEspera = liveChannel();
+            // O batimento contínuo para ANTES de a pausa acender o "digitando": os
+            // dois acendem a MESMA luz, e mantê-los juntos dispararia presença
+            // duplicada. A pausa a reacende no instante seguinte.
+            digitando?.parar();
+            esperaSobreposta = iniciarEsperaSobreposta({
+              textoCandidato: primeiraBolhaCandidata,
+              sleep: deps.sleep ?? ((s) => new Promise((resolve) => setTimeout(resolve, s))),
+              log: runLog,
+              ...(canalDaEspera.signalTyping
+                ? {
+                    sinalizarDigitando: (): Promise<void> =>
+                      canalDaEspera.signalTyping!({
+                        tenantId,
+                        conversationId: input.conversationId,
+                      }),
+                  }
+                : {}),
+            });
+          }
           let chain = await runBeforeSend(beforeSendArgs);
           if (chain.status === 'vetoed' && chain.code === 'case_promise_without_case') {
             // Wave 4 — fail-safe da invariante sagrada: o lead NUNCA recebe promessa-de-
@@ -3852,9 +3920,10 @@ async function executarTurnoDoAgente(
     // `checkpoint` — que é outra chamada de modelo e não fala com o lead.
     //
     // A MEDIÇÃO FECHA AQUI, e não depois do fechamento: até este ponto o turno
-    // está respondendo ao lead — `envio` cobre o `runModelCall` inteiro (que é
-    // quem executa o `send_message`, e portanto a espera humana e a rede do
-    // canal). O `checkpoint` é retaguarda e vem depois, na fase dele.
+    // está respondendo ao lead. `envio` abre no prelúdio do `send_message` — o
+    // instante em que o turno passa a TENTAR falar com o lead — e cobre a pausa
+    // humana SOBREPOSTA à cadeia de gates e a rede do canal. O `checkpoint` é
+    // retaguarda e vem depois, na fase dele.
     fecharMedicaoDeFases(medicaoDoTurno ?? null, runLog);
     digitando?.parar();
 
