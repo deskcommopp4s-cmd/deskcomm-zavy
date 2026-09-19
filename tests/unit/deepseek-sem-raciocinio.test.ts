@@ -27,6 +27,7 @@ import { generateText, type LanguageModel } from "ai";
 
 import { llmEdgeConfigFromEnv } from "@/lib/agent-engine/edge/llm/credentials";
 import { createDefaultRegistry } from "@/lib/agent-engine/edge/llm/providers";
+import { buildModel } from "@/lib/ai/runtime/agent";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -148,6 +149,51 @@ describe("outros provedores intactos — o campo é só da DeepSeek", () => {
       "sk-de-teste",
       "claude-sonnet-4-5",
     );
+    await disparar(modelo);
+    expect(corpos[0]?.["thinking"]).toBeUndefined();
+    expect(corpos[0]?.["reasoning"]).toBeUndefined();
+  });
+});
+
+describe("o caminho do ENSAIO (buildModel) honra o MESMO knob", () => {
+  // O `buildModel` duplicava a fábrica da DeepSeek e NÃO recebia o knob: o
+  // ensaio (botão "Teste" / runtime interno / onboarding) falava com o
+  // provedor com o raciocínio LIGADO enquanto o turno real já o tinha
+  // desligado — dois caminhos para o mesmo provedor, com custo e latência
+  // diferentes. Ele agora injeta o MESMO campo pela MESMA função do registry.
+  it("knob 'disabled' → o ensaio manda thinking.type=disabled no corpo", async () => {
+    const { corpos } = interceptarSaida();
+    const modelo = buildModel("deepseek", "sk-de-teste", "deepseek-flash", "disabled");
+    await disparar(modelo);
+    expect(corpos[0]?.["thinking"]).toEqual({ type: "disabled" });
+  });
+
+  it("knob 'disabled' → o ensaio manda reasoning.effort=none no corpo", async () => {
+    const { corpos } = interceptarSaida();
+    const modelo = buildModel("deepseek", "sk-de-teste", "deepseek-flash", "disabled");
+    await disparar(modelo);
+    expect(corpos[0]?.["reasoning"]).toEqual({ effort: "none" });
+  });
+
+  it("a rota do ensaio é a mesma (/responses) — não é um request novo", async () => {
+    const { urls, corpos } = interceptarSaida();
+    const modelo = buildModel("deepseek", "sk-de-teste", "deepseek-flash", "disabled");
+    await disparar(modelo);
+    expect(urls[0]).toBe(ROTA_RESPONSES_DEEPSEEK);
+    expect(corpos[0]?.["model"]).toBe("deepseek-flash");
+  });
+
+  it("default preservado: sem o knob, o ensaio não manda os campos", async () => {
+    const { corpos } = interceptarSaida();
+    const modelo = buildModel("deepseek", "sk-de-teste", "deepseek-flash", "provider");
+    await disparar(modelo);
+    expect(corpos[0]?.["thinking"]).toBeUndefined();
+    expect(corpos[0]?.["reasoning"]).toBeUndefined();
+  });
+
+  it("o alvo é só a DeepSeek — o buildModel da Anthropic fica intacto", async () => {
+    const { corpos } = interceptarSaida();
+    const modelo = buildModel("anthropic", "sk-de-teste", "claude-sonnet-4-5", "disabled");
     await disparar(modelo);
     expect(corpos[0]?.["thinking"]).toBeUndefined();
     expect(corpos[0]?.["reasoning"]).toBeUndefined();

@@ -2158,9 +2158,10 @@ async function executarTurnoDoAgente(
   // turno como o playbook (publicar ⇒ próximo turno vale). composeSystemPrompt já
   // encaixa playbook + memória + índice de skills no prefixo cacheável.
   const orgMemory = await loadOrgMemory(pool, tenantId);
+  const orgMemoryBlock = renderOrgMemory(orgMemory);
   const systemWithMemory = composeSystemPrompt({
     playbookPrompt: playbook.prompt,
-    orgMemoryBlock: renderOrgMemory(orgMemory),
+    orgMemoryBlock,
     skillIndex,
   });
   // Spec 15 §5.2: bloco das tools de caso SEMPRE residente (não invalida o prefixo
@@ -2169,13 +2170,30 @@ async function executarTurnoDoAgente(
   // tools publicadas — ver comentário de `agendaSystemBlock`. `TRANSPARENCIA_SYSTEM_BLOCK`
   // não depende de nenhuma feature — todo agente publicado o recebe.
   const blocosResidentes = [systemWithMemory, TRANSPARENCIA_SYSTEM_BLOCK];
-  if (agentConfig !== null && agentConfig.casesEnabled) blocosResidentes.push(CASES_SYSTEM_BLOCK);
+  // As partes NOMEADAS do `system` — vão junto do request só para a MEDIÇÃO da
+  // composição do prompt medir cada uma (`composicao-do-prompt.ts`). Só nomes e
+  // tamanhos saem no log; nenhum texto.
+  const partesDoSystem: Record<string, string> = {
+    playbook: playbook.prompt,
+    memoria_da_org: orgMemoryBlock,
+    indice_de_skills: skillIndex,
+    transparencia: TRANSPARENCIA_SYSTEM_BLOCK,
+  };
+  if (agentConfig !== null && agentConfig.casesEnabled) {
+    blocosResidentes.push(CASES_SYSTEM_BLOCK);
+    partesDoSystem.casos = CASES_SYSTEM_BLOCK;
+  }
   const blocoDaAgenda = agentConfig === null ? null : blocoResidenteDaAgenda(agentConfig.toolIds);
-  if (blocoDaAgenda !== null) blocosResidentes.push(blocoDaAgenda);
-  if (preview)
-    blocosResidentes.push(
-      'MODO PRÉVIA: proponha a resposta com send_message. Operações são propostas separadas; nunca diga que executou uma proposta. Nenhum envio real acontece.',
-    );
+  if (blocoDaAgenda !== null) {
+    blocosResidentes.push(blocoDaAgenda);
+    partesDoSystem.agenda = blocoDaAgenda;
+  }
+  if (preview) {
+    const modoPrevia =
+      'MODO PRÉVIA: proponha a resposta com send_message. Operações são propostas separadas; nunca diga que executou uma proposta. Nenhum envio real acontece.';
+    blocosResidentes.push(modoPrevia);
+    partesDoSystem.modo_previa = modoPrevia;
+  }
   const system = blocosResidentes.join('\n\n');
   const previous = preview
     ? (preview.previous ?? null)
@@ -4158,6 +4176,8 @@ async function executarTurnoDoAgente(
         agentId: agentConfig?.agentId ?? null,
         purpose: preview ? 'agent_preview' : 'agent_turn',
         system,
+        // Só para a medição de composição (tamanhos por bloco; nunca o texto).
+        systemParts: partesDoSystem,
         messages: openingMessages,
         tools,
         maxSteps,

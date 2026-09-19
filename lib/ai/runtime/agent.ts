@@ -31,8 +31,11 @@ import { generateText, stepCountIs, type LanguageModel, type StopCondition, type
 // Repetir a URL aqui criaria dois lugares para consertar quando ela mudar.
 import {
   cabecalhosDeAtribuicaoOpenRouter,
+  comRaciocinioDesligado,
   DEEPSEEK_ENDPOINT,
+  normalizarRaciocinioDeepseek,
   OPENROUTER_ENDPOINT,
+  type RaciocinioDeepseek,
 } from "@/lib/agent-engine/edge/llm/providers";
 import { CredentialUnavailableError, loadCredential } from "@/lib/ai/credentials";
 import { decidirElegibilidadeDaConversaViaSupabase } from "@/lib/ai/elegibilidade/consulta-supabase";
@@ -164,7 +167,22 @@ export function chaveDePlataforma(provider: string): string | null {
   return v === "" ? null : v;
 }
 
-export function buildModel(provider: string, apiKey: string, modelId: string): LanguageModel {
+export function buildModel(
+  provider: string,
+  apiKey: string,
+  modelId: string,
+  /**
+   * Knob `DEEPSEEK_THINKING` — o MESMO que o registry de produção recebe por
+   * `createDefaultRegistry({ deepseekThinking })`. Sem ele, o ensaio (botão
+   * "Teste", runtime interno e onboarding) falava com a DeepSeek com o
+   * raciocínio LIGADO enquanto o turno real já o tinha desligado: dois caminhos
+   * para o mesmo provedor, com custo e latência diferentes.
+   *
+   * Ausente = default do ambiente (lido pelo mesmo normalizador do
+   * `llmEdgeConfigFromEnv`), nunca um segundo default.
+   */
+  deepseekThinking: RaciocinioDeepseek = normalizarRaciocinioDeepseek(process.env.DEEPSEEK_THINKING),
+): LanguageModel {
   switch (provider) {
     case "anthropic":
       return createAnthropic({ apiKey })(modelId);
@@ -188,7 +206,14 @@ export function buildModel(provider: string, apiKey: string, modelId: string): L
     // ensaio enquanto o worker responderia a mensagem real — ensaio mais
     // rígido que a produção mente sobre o que está quebrado.
     case "deepseek":
-      return createOpenAI({ apiKey, baseURL: DEEPSEEK_ENDPOINT })(modelId);
+      // Mesma injeção do registry (`comRaciocinioDesligado`), não uma cópia: o
+      // desligamento é um campo no CORPO do request e precisa ser idêntico nos
+      // dois caminhos — ver o comentário do knob em providers.ts.
+      return createOpenAI({
+        apiKey,
+        baseURL: DEEPSEEK_ENDPOINT,
+        ...(deepseekThinking === "disabled" ? { fetch: comRaciocinioDesligado(fetch) } : {}),
+      })(modelId);
     default:
       throw new Error(`unsupported_provider: ${provider}`);
   }
@@ -499,7 +524,14 @@ export async function runAgent(input: RunAgentInput): Promise<RunAgentResult> {
       : [];
 
     // 9) Build LM directly against the provider (BYOK credential — see buildModel doc).
-    const model = buildModel(version.provider, credentialApiKey, version.model);
+    // O knob é propagado explícito, como o `cfg.deepseekThinking` do seam
+    // (`run-model-call.ts`): o ensaio tem de mandar o MESMO desligamento do turno.
+    const model = buildModel(
+      version.provider,
+      credentialApiKey,
+      version.model,
+      normalizarRaciocinioDeepseek(process.env.DEEPSEEK_THINKING),
+    );
 
     // 10) Cost/token guard. Fires BEFORE the next step is taken.
     let abortReason: string | null = null;
