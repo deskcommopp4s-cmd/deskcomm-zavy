@@ -26,7 +26,7 @@ import {
   type ChaveDeOrcamento,
   type ModoDeOrcamento,
 } from './orcamento';
-import type { RaciocinioDeepseek } from './providers';
+import { normalizarRaciocinioDeepseek, type RaciocinioDeepseek } from './providers';
 import type { CacheTtl } from './stable-prefix';
 
 /** Config da camada LLM montada do env validado (padrão crmEdgeConfigFromEnv). */
@@ -62,6 +62,12 @@ export interface LlmEdgeConfig {
    */
   deepseekThinking?: RaciocinioDeepseek;
   /**
+   * Medição da composição do prompt (linha "llm: composição do prompt" +
+   * "llm: tokens de entrada por passo"). Knob `LLM_PROMPT_COMPOSITION`; ausente
+   * = `true`. LIGADA por default — ver `composicao-do-prompt.ts`.
+   */
+  promptComposition?: boolean;
+  /**
    * `AI_BUDGET_ENFORCEMENT` já normalizado — o kill switch do operador da
    * instalação. Ausente = `'on'`, e `'on'` NÃO LIGA NADA: significa apenas
    * "respeite o que cada organização escolheu". A chave só sabe AFROUXAR.
@@ -93,21 +99,27 @@ export function llmEdgeConfigFromEnv(env: {
   LLM_CACHE_TTL?: string;
   AI_BUDGET_ENFORCEMENT?: string;
   DEEPSEEK_THINKING?: string;
+  LLM_PROMPT_COMPOSITION?: string;
 }): LlmEdgeConfig {
   const ttl = env.LLM_CACHE_TTL ?? '1h';
   if (ttl !== '5m' && ttl !== '1h') {
     throw new Error("LLM_CACHE_TTL inválido — use '5m' ou '1h' (default 1h)");
   }
-  const raciocinio = env.DEEPSEEK_THINKING ?? 'provider';
-  if (raciocinio !== 'provider' && raciocinio !== 'disabled') {
-    throw new Error("DEEPSEEK_THINKING inválido — use 'provider' ou 'disabled' (default provider)");
+  const composicao = env.LLM_PROMPT_COMPOSITION ?? 'true';
+  if (composicao !== 'true' && composicao !== 'false') {
+    throw new Error("LLM_PROMPT_COMPOSITION inválido — use 'true' ou 'false' (default true)");
   }
+  // Validação/normalização em UM lugar só (`normalizarRaciocinioDeepseek`):
+  // o runtime de ensaio (`buildModel`) lê o mesmo knob direto do env, e dois
+  // parsers divergiriam no dia em que um aceitasse o que o outro recusa.
+  const raciocinio = normalizarRaciocinioDeepseek(env.DEEPSEEK_THINKING);
   return {
     ...(env.ANTHROPIC_API_KEY ? { anthropicApiKey: env.ANTHROPIC_API_KEY } : {}),
     ...(env.OPENAI_API_KEY ? { openaiApiKey: env.OPENAI_API_KEY } : {}),
     ...(env.OPENROUTER_API_KEY ? { openrouterApiKey: env.OPENROUTER_API_KEY } : {}),
     cacheTtl: ttl,
     deepseekThinking: raciocinio,
+    promptComposition: composicao === 'true',
     // Sem `if` de valor vazio, ao contrário das chaves acima: aqui o ausente
     // TEM um significado ('on'), e o normalizador é quem o dá. Um campo
     // opcional que some faria o seam ter de repetir o default, e dois defaults

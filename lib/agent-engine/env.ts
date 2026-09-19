@@ -159,6 +159,16 @@ const envSchema = z.object({
   // 'disabled' injeta o desligamento no corpo das chamadas — e SÓ nas da
   // DeepSeek (a fábrica é dela; ver providers.ts).
   DEEPSEEK_THINKING: z.enum(['provider', 'disabled']).default('provider'),
+  // Medição da COMPOSIÇÃO do prompt: contagens e tamanhos por bloco (system e
+  // suas partes, ferramentas, mensagens, e os tokens de entrada POR PASSO do
+  // laço de tool-calls). LIGADA por default — mesma doutrina de
+  // AGENT_TURN_TIMING: ela existe para descobrir onde estão os tokens que
+  // `llm_calls` não explica, e uma medição opt-in nasceria desligada no
+  // ambiente que mais precisa dela. Uma linha de log por chamada é o custo.
+  // String (sem transform), como DEEPSEEK_THINKING: quem normaliza é o
+  // `llmEdgeConfigFromEnv`, que é o dono da config LLM — um segundo parser aqui
+  // poderia aceitar o que ele recusa.
+  LLM_PROMPT_COMPOSITION: z.enum(['true', 'false']).default('true'),
   // Payload curado da tool get_lead_context.
   LEAD_CONTEXT_HISTORY_LIMIT: z.coerce.number().int().positive().default(20),
   LEAD_CONTEXT_MAX_TOKENS: z.coerce.number().int().positive().default(1_000),

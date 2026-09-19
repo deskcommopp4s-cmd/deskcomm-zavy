@@ -46,7 +46,21 @@ export const OPENROUTER_ENDPOINT = 'https://openrouter.ai/api/v1';
 /**
  * A DeepSeek também fala a API da OpenAI — mesma fábrica, mesmo formato de
  * payload, sem SDK novo. O endpoint é a raiz que o provedor documenta (ele
- * também aceita `/v1`); o `@ai-sdk/openai` acrescenta `/chat/completions`.
+ * também aceita `/v1`).
+ *
+ * ⚠️ O `@ai-sdk/openai` NÃO acrescenta `/chat/completions`. Nesta versão
+ * (@ai-sdk/openai 4.0.64), `createOpenAI(opts)(modelId)` devolve o modelo
+ * **Responses** e o request sai para `<baseURL>/responses`. Evidência no próprio
+ * pacote instalado:
+ *   - `createLanguageModel` chama `createResponsesModel(modelId)`
+ *     (node_modules/@ai-sdk/openai/dist/index.js:11309);
+ *   - `createResponsesModel` constrói `OpenAIResponsesLanguageModel`
+ *     (idem:11311-11322);
+ *   - o POST monta a URL com `path: "/responses"` (idem:7827).
+ *
+ * O comentário anterior afirmava `/chat/completions` e custou tempo: mandou
+ * testar o campo errado (`thinking`, da Chat Completions) numa rota que só lê
+ * `reasoning.effort`. Ver `comRaciocinioDesligado`, logo abaixo.
  */
 export const DEEPSEEK_ENDPOINT = 'https://api.deepseek.com';
 
@@ -84,6 +98,17 @@ export function cabecalhosDeAtribuicaoOpenRouter(): Record<string, string> | und
 export type RaciocinioDeepseek = 'provider' | 'disabled';
 
 /**
+ * Normaliza o knob `DEEPSEEK_THINKING` — fonte ÚNICA do default e da validação,
+ * para que o worker (`llmEdgeConfigFromEnv`) e o runtime de ensaio (`buildModel`)
+ * não aceitem valores diferentes. Ausente = `'provider'` (o provedor decide).
+ */
+export function normalizarRaciocinioDeepseek(valor: string | undefined): RaciocinioDeepseek {
+  if (valor === undefined || valor === '') return 'provider';
+  if (valor === 'provider' || valor === 'disabled') return valor;
+  throw new Error("DEEPSEEK_THINKING inválido — use 'provider' ou 'disabled' (default provider)");
+}
+
+/**
  * Desliga o raciocínio da DeepSeek no CORPO do request — sem tocar em prompt,
  * tools, temperatura ou qualquer outro parâmetro da chamada.
  *
@@ -105,7 +130,7 @@ export type RaciocinioDeepseek = 'provider' | 'disabled';
  * O corpo é lido por cima do `init` que o SDK montou, então nada mais muda; um
  * `reasoning` já presente é preservado (só o `effort` é forçado a 'none').
  */
-function comRaciocinioDesligado(inner: typeof fetch): typeof fetch {
+export function comRaciocinioDesligado(inner: typeof fetch): typeof fetch {
   return (input, init) => {
     const corpo = init?.body;
     if (typeof corpo === 'string') {

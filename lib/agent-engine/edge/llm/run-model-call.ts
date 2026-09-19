@@ -36,10 +36,17 @@ import {
   SQL_ORCAMENTO,
   type ChaveDeOrcamento,
 } from './orcamento';
+import {
+  logarComposicaoInicial,
+  logarPassos,
+  medirComposicaoDoPrompt,
+  medirPassos,
+  type ComposicaoDoPrompt,
+} from './composicao-do-prompt';
 import { ferramentasDoPonto } from './ferramentas-do-ponto';
 import { costCents } from './pricing';
 import { createDefaultRegistry, type ProviderRegistry } from './providers';
-import { buildStablePrefix } from './stable-prefix';
+import { buildStablePrefix, serializeStablePrefix } from './stable-prefix';
 
 // Call sites FORA da camada importam os tipos daqui — nunca de 'ai' direto
 // (o seam é a única porta). `tool` idem: é como o agente define ToolSet sem
@@ -133,6 +140,14 @@ export interface RunModelCallInput {
    * 2B) — resolvido no seam, nunca no call site. Sem ele, config da org.
    */
   llmOverride?: import('./credentials').LlmResolveOverride;
+  /**
+   * Partes NOMEADAS do `system` (playbook, memória da org, índice de skills…)
+   * para a medição de composição. NUNCA vão a log como CONTEÚDO — só o TAMANHO
+   * de cada uma sai (`composicao-do-prompt.ts`). Opcional de propósito: só a
+   * chamada principal do turno conhece as partes; os auxiliares passam o system
+   * inteiro, e a medição cobre o total dele mesmo assim.
+   */
+  systemParts?: Record<string, string>;
 }
 
 export interface RunModelCallDeps {
@@ -431,6 +446,48 @@ export async function runModelCall(db: pg.Pool, cfg: LlmEdgeConfig, input: RunMo
     cacheTtl: cfg.cacheTtl ?? '1h',
   });
 
+  // As MESMAS tools que vão ao provider ficam numa const para que a medição de
+  // composição e o `generateText` não possam divergir (medir uma lista e enviar
+  // outra é a forma silenciosa de um diagnóstico mentir).
+  const toolsFinais = guardServiceTools(prefix.tools);
+
+  // ── A MEDIÇÃO DA COMPOSIÇÃO ────────────────────────────────────────────────
+  //
+  // Roda ANTES do request e é PURA (só `length`/`JSON.stringify` de blocos que
+  // já existem). Serve para responder "quanto custa cada bloco?" — a pergunta
+  // que a chamada principal deixou aberta em produção (ver o cabeçalho de
+  // `composicao-do-prompt.ts`). Desligável por `LLM_PROMPT_COMPOSITION=false`;
+  // default LIGADO. Falha aqui NUNCA pode derrubar a chamada.
+  const composicaoInicial: ComposicaoDoPrompt | null =
+    cfg.promptComposition === false
+      ? null
+      : await (async (): Promise<ComposicaoDoPrompt | null> => {
+          try {
+            return medirComposicaoDoPrompt({
+              system: typeof prefix.system?.content === 'string' ? prefix.system.content : undefined,
+              ...(input.systemParts !== undefined ? { partesDoSystem: input.systemParts } : {}),
+              ferramentas: {
+                quantidade: toolsFinais === undefined ? 0 : Object.keys(toolsFinais).length,
+                serializado: await serializeStablePrefix({ tools: toolsFinais }),
+              },
+              mensagens: input.messages,
+            });
+          } catch (err) {
+            deps.log?.warn('llm: composição do prompt não pôde ser medida — a chamada segue', {
+              organization_id: input.tenantId,
+              purpose,
+              error: err instanceof Error ? err.name : 'unknown',
+            });
+            return null;
+          }
+        })();
+  if (composicaoInicial !== null && deps.log) {
+    logarComposicaoInicial(deps.log, composicaoInicial, {
+      organization_id: input.tenantId,
+      purpose,
+    });
+  }
+
   const startedAt = Date.now();
   let result: Awaited<ReturnType<typeof generateText>>;
   try {
@@ -443,7 +500,7 @@ export async function runModelCall(db: pg.Pool, cfg: LlmEdgeConfig, input: RunMo
       model: factory(config.apiKey, model, decisao.baseUrl ?? undefined),
       system: prefix.system,
       messages: input.messages,
-      tools: guardServiceTools(prefix.tools),
+      tools: toolsFinais,
       stopWhen: input.maxSteps === undefined ? undefined : stepCountIs(input.maxSteps),
       temperature,
       topP,
@@ -486,6 +543,28 @@ export async function runModelCall(db: pg.Pool, cfg: LlmEdgeConfig, input: RunMo
     throw err;
   }
   const latencyMs = Date.now() - startedAt;
+
+  // ── POR PASSO: ONDE O NÚMERO DO `llm_calls` NASCE ──────────────────────────
+  //
+  // `result.usage.inputTokens` (que vira `llm_calls.input_tokens` logo abaixo) é
+  // a SOMA dos passos do laço — cada passo reenvia o prompt inteiro. Medir por
+  // passo é o que revela se o custo é o prompt ou o número de reenvios. Mesma
+  // garantia: só tamanhos, nunca conteúdo; e nunca derruba a chamada.
+  if (composicaoInicial !== null && deps.log) {
+    try {
+      logarPassos(deps.log, medirPassos(result.steps), {
+        organization_id: input.tenantId,
+        purpose,
+        input_tokens_inicial_est: composicaoInicial.total.tokens_est,
+      });
+    } catch (err) {
+      deps.log.warn('llm: tokens por passo não puderam ser medidos', {
+        organization_id: input.tenantId,
+        purpose,
+        error: err instanceof Error ? err.name : 'unknown',
+      });
+    }
+  }
 
   const usage = {
     inputTokens: result.usage.inputTokens ?? 0,
