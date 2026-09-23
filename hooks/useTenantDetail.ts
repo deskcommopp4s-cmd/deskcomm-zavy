@@ -19,6 +19,13 @@ export interface TenantOrganization {
   suspended_at: string | null;
   created_at: string;
   settings: Record<string, unknown> | null;
+  /**
+   * NÍVEL 2 da qualificação do lead (migration 0267): o superadmin liberou a
+   * feature para esta organização? Default `false`. Opcional no tipo porque a
+   * rota pode não devolvê-lo num clone que ainda não aplicou a migração — e
+   * ausente lê-se como desligado.
+   */
+  qualificacao_jev_ativa?: boolean;
 }
 
 export interface TenantCounts {

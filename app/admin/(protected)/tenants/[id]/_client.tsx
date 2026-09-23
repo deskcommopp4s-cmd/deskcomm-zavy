@@ -4,6 +4,7 @@ import { useTenantDetail } from "@/hooks/useTenantDetail";
 import { TenantOverview } from "@/components/admin/tenants/TenantOverview";
 import { TenantActions } from "@/components/admin/tenants/TenantActions";
 import { SuspendedBanner } from "@/components/admin/tenants/SuspendedBanner";
+import { QualificacaoDaOrganizacao } from "@/components/admin/tenants/QualificacaoDaOrganizacao";
 import { useT } from "@/hooks/i18n/useT";
 
 interface TenantOverviewClientProps {
@@ -56,6 +57,11 @@ export function TenantOverviewClient({ id }: TenantOverviewClientProps) {
           displayName={organization.display_name}
         />
       </div>
+
+      <QualificacaoDaOrganizacao
+        organizationId={organization.id}
+        ativa={organization.qualificacao_jev_ativa === true}
+      />
     </div>
   );
 }

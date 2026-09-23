@@ -252,15 +252,21 @@ export const agendaSettingsSchema = agendaSettingsWriteSchema.catch({confirmatio
  * Nasce DESLIGADA em toda organização, e só um administrador a liga, por
  * `fn_definir_cliente_pela_agenda` (nunca por UPDATE em `organizations`).
  *
- * ⚠️ SÓ O BOOLEANO `true` LIGA — e é a mesma régua do banco, que compara
- * `settings->'crm'->'cliente_pela_agenda' = 'true'::jsonb` em
- * `fn_marcar_contato_como_cliente`. Ausente, `false`, a string `"true"` ou
- * qualquer lixo é desligado aqui E lá. Se os dois idiomas divergissem, a tela
- * mostraria o selo de uma regra que o trigger não aplica.
+ * `regressao_de_funil_ativada`: o agente pode REGREDIR a etapa do negócio quando
+ * o Jev (TypeSafe) julga que o lead voltou (migration 0267). Nasce DESLIGADA em
+ * toda organização — o comportamento de hoje (o card só avança) é preservado até
+ * um admin da conta optar por regredir. Quem lê é a orquestração da qualificação
+ * (`qualificacao-do-lead.ts`), que a combina com o BFS inverso do funil.
+ *
+ * ⚠️ SÓ O BOOLEANO `true` LIGA — mesma régua de `cliente_pela_agenda`: ausente,
+ * `false`, a string `"true"` ou qualquer lixo é desligado.
  */
 export const crmSettingsSchema = z
-  .object({ cliente_pela_agenda: z.boolean().catch(false) })
-  .catch({ cliente_pela_agenda: false });
+  .object({
+    cliente_pela_agenda: z.boolean().catch(false),
+    regressao_de_funil_ativada: z.boolean().catch(false),
+  })
+  .catch({ cliente_pela_agenda: false, regressao_de_funil_ativada: false });
 
 /** A regra "cliente pela agenda" está ligada nesta organização? Nunca lança. */
 export function clientePelaAgendaLigado(settings: unknown): boolean {
@@ -269,4 +275,13 @@ export function clientePelaAgendaLigado(settings: unknown): boolean {
       ? (settings as Record<string, unknown>).crm
       : undefined;
   return crmSettingsSchema.parse(crm ?? {}).cliente_pela_agenda === true;
+}
+
+/** A organização habilitou REGRESSÃO de funil? Nunca lança; default false. */
+export function regressaoDeFunilAtivada(settings: unknown): boolean {
+  const crm =
+    settings && typeof settings === "object" && !Array.isArray(settings)
+      ? (settings as Record<string, unknown>).crm
+      : undefined;
+  return crmSettingsSchema.parse(crm ?? {}).regressao_de_funil_ativada === true;
 }

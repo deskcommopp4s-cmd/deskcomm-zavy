@@ -574,6 +574,22 @@ export const AUDIT_ACTIONS = [
   // "quando esta chave foi trocada, e por quem" é a pergunta que só esta linha
   // responde — a coluna `updated_at` se move por qualquer motivo.
   "ai.credential_updated",
+  // A chave do provedor de DECISÃO da INSTALAÇÃO cadastrada/trocada em
+  // `platform_decision_credentials` (migration 0267). Sem `organization_id`: a
+  // chave deixou de ser BYOK e passou a ser da plataforma. Auditável porque quem
+  // troca a chave muda o julgamento que move o funil de TODOS os clientes
+  // daquela instalação. `metadata.last4` (não a chave) responde "para onde girou".
+  "platform_decision_credential.updated",
+  // O nível 2 dos três da qualificação do lead (migration 0267): o superadmin
+  // libera/revoga a feature para UMA organização. Auditável porque é o que
+  // decide se a IA daquela conta qualifica por decisão ou pelo classificador
+  // antigo — e "quem liberou isto para este cliente?" só tem resposta aqui.
+  "tenant.qualificacao_jev_alterada",
+  // A regressão de funil da ORGANIZAÇÃO ligada/desligada
+  // (`organizations.settings.crm.regressao_de_funil_ativada`, migration 0267).
+  // Auditável porque muda como o agente move o card: com ela ligada o negócio
+  // pode ANDAR PARA TRÁS no funil.
+  "crm.regressao_de_funil_alterada",
 ] as const;
 
 /** Um código de auditoria. Derivado de `AUDIT_ACTIONS` — não redigite a lista. */

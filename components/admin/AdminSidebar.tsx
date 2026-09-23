@@ -15,6 +15,7 @@ import {
   Palette,
   Key,
   WebhooksLogo,
+  Brain,
   ArrowRight,
 } from "@/lib/ui/icons";
 import type { Icon as PhosphorIcon } from "@phosphor-icons/react";
@@ -56,6 +57,10 @@ const NAV_ITEMS: NavItem[] = [
   // razão das duas de cima: é configuração da INSTALAÇÃO, e /admin tem
   // navegação própria (o registro de `lib/navigation/` cobre só `app/app/**`).
   { href: "/admin/cadastro", label: "Cadastro", icon: Key },
+  // A porta da tela da chave do provedor de DECISÃO (Jev/TypeSafe) da
+  // INSTALAÇÃO — mesma razão das de cima: uma chave só, para todas as empresas,
+  // e /admin tem navegação própria.
+  { href: "/admin/decisao", label: "Provedor de decisão (JEV)", icon: Brain },
 ];
 
 interface AdminSidebarProps {

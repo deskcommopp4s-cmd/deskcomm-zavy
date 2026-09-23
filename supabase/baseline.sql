@@ -26661,3 +26661,48 @@ alter table public.platform_settings
 
 comment on column public.platform_settings.qualificacao_jev_ativa is
   'Kill switch GLOBAL da qualificação do lead com um provedor de decisão (Jev/TypeSafe). O interruptor POR ORGANIZAÇÃO é o binding habilitado em ai_purpose_bindings (purpose=qualificacao_do_lead).';
+
+-- ---- Os três níveis de habilitação da qualificação do lead (migration 0267) ----
+--
+-- (1) Nível 2 (superadmin por organização): `organizations.qualificacao_jev_ativa`.
+-- Default `false` — ninguém ganha a feature sem liberação explícita; qualquer
+-- um dos três níveis desligado devolve o classificador de etapa atual.
+alter table public.organizations
+  add column if not exists qualificacao_jev_ativa boolean not null default false;
+
+comment on column public.organizations.qualificacao_jev_ativa is
+  'Nível 2 dos três da qualificação do lead (Jev/TypeSafe): o SUPERADMIN libera a feature para esta organização. Default false — ninguém ganha sem liberação. O nível 1 é platform_settings.qualificacao_jev_ativa; o nível 3 é ai_purpose_bindings.is_enabled (purpose=qualificacao_do_lead). Efetivo = os três ligados.';
+
+-- (2) Nível 1 (credencial): o cofre da chave de plataforma do provedor de
+-- decisão. Mesmo desenho da família platform_*: singleton por provedor, RLS sem
+-- policies, só service_role. Colunas iguais às de ai_provider_credentials
+-- (ciphertext/iv/tag/last4) porque a cifra é a mesma (lib/crypto/aes_gcm.ts).
+create table if not exists public.platform_decision_credentials (
+  provider text primary key,
+  api_key_encrypted bytea not null,
+  api_key_iv bytea not null,
+  api_key_tag bytea not null,
+  api_key_last4 text not null,
+  is_active boolean not null default true,
+  updated_at timestamptz not null default now(),
+  updated_by uuid
+);
+
+comment on table public.platform_decision_credentials is
+  'A chave do provedor de DECISÃO desta INSTALAÇÃO (Jev/TypeSafe e futuros), uma linha por provedor. Server-side only: RLS ligada sem policies e grants revogados de anon/authenticated. A leitura decifra com AI_CRED_AES_KEY (lib/crypto/aes_gcm.ts); nenhuma rota devolve a chave em claro.';
+comment on column public.platform_decision_credentials.api_key_encrypted is
+  'Cifrado por encryptKey (AES-256-GCM, chave em AI_CRED_AES_KEY). Nunca gravar em claro: sem a chave mestra o save RECUSA.';
+comment on column public.platform_decision_credentials.api_key_last4 is
+  'Os 4 últimos caracteres da chave, em claro, só para a tela identificar qual está cadastrada. A chave inteira nunca volta ao browser.';
+comment on column public.platform_decision_credentials.is_active is
+  'Desligar sem apagar. A escada de chave só considera linha ativa antes de cair para o ambiente.';
+
+alter table public.platform_decision_credentials enable row level security;
+
+revoke all on public.platform_decision_credentials from anon, authenticated;
+grant select, insert, update on public.platform_decision_credentials to service_role;
+
+drop trigger if exists trg_platform_decision_credentials_updated_at on public.platform_decision_credentials;
+create trigger trg_platform_decision_credentials_updated_at
+  before update on public.platform_decision_credentials
+  for each row execute function public.fn_set_updated_at();

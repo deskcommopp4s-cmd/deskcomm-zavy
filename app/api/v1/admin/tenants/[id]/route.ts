@@ -39,7 +39,8 @@ export async function GET(
       onboarded_at,
       suspended_at,
       created_at,
-      settings
+      settings,
+      qualificacao_jev_ativa
     `,
     )
     .eq("id", id)

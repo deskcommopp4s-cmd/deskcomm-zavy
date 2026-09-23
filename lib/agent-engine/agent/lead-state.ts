@@ -173,6 +173,15 @@ export async function applyLeadStateUpdate(
   db: Queryable,
   ids: { tenantId: string; leadId: string; jobId?: string | null },
   rawInput: unknown,
+  opts: {
+    /**
+     * Aceita UM passo para TRÁS quando a ida correspondente é válida
+     * (`LEAD_STAGE_TRANSITIONS[novo]` contém o atual). Default `false`: a máquina
+     * continua recusando regressão e salto como sempre — quem liga é só a
+     * qualificação com a regressão de funil habilitada pela organização.
+     */
+    permitirRegressao?: boolean;
+  } = {},
 ): Promise<LeadStateUpdateResult> {
   const forbidden = findForbiddenKey(rawInput);
   if (forbidden !== null) {
@@ -190,7 +199,12 @@ export async function applyLeadStateUpdate(
   let transition: { from: LeadStage; to: LeadStage; reason?: string } | null = null;
   let noop = false;
   if (input.stage !== undefined && input.stage !== currentStage) {
-    if (!isValidTransition(currentStage, input.stage)) {
+    // Uma transição é válida se avança pelo grafo — ou, com a regressão
+    // habilitada, se é o inverso de um avanço válido (andar para trás um passo).
+    const avanca = isValidTransition(currentStage, input.stage);
+    const regride =
+      opts.permitirRegressao === true && LEAD_STAGE_TRANSITIONS[input.stage].includes(currentStage);
+    if (!avanca && !regride) {
       return teachInvalidTransition(currentStage, input.stage);
     }
     transition = { from: currentStage, to: input.stage, ...(input.reason !== undefined ? { reason: input.reason } : {}) };
