@@ -4071,7 +4071,17 @@ async function executarTurnoDoAgente(
           deps.jev,
         );
         jevUsado = qualificacao.usado;
-        if (qualificacao.usado) {
+        // Quando NÃO usa, o motivo precisa aparecer: o silêncio aqui custou horas de
+          // diagnóstico. Nível desligado, credencial que não abriu e provedor
+          // desconhecido ficavam TODOS invisíveis — e o classificador antigo
+          // rodava como se nada tivesse sido configurado.
+          if (!qualificacao.usado) {
+            runLog.info('qualificação por decisão (JEV) não usada — o classificador atual assume', {
+              motivo: qualificacao.motivo,
+              ...(qualificacao.detalhe ? { detalhe: qualificacao.detalhe } : {}),
+            });
+          }
+          if (qualificacao.usado) {
           // Só nomes/ids/contadores — nunca a conversa. `etapa` é nome de estágio.
           runLog.info('qualificação por decisão (JEV) aplicada', {
             movido: qualificacao.movido,

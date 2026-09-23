@@ -318,7 +318,7 @@ export async function lerHabilitacaoDaOrganizacao(
 ): Promise<boolean> {
   try {
     const { rows } = await db.query<{ ativa: boolean | null }>(
-      "select qualificacao_jev_ativa from organizations where id = $1",
+      "select qualificacao_jev_ativa as ativa from organizations where id = $1",
       [organizationId],
     );
     return rows[0]?.ativa === true;
