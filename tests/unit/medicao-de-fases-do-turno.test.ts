@@ -129,6 +129,35 @@ describe("criarMedicaoDeFases", () => {
     expect(medicao.inicioDaFase('envio')).toBe(inicio);
   });
 
+  it("a soma das fases fecha com o total — e `chamada_principal` NÃO subdimensiona quando o envio a interrompe", () => {
+    // O turno REAL: `chamada_principal` abre antes do `runModelCall`, o modelo
+    // chama `send_message` (que abre `envio` no prelúdio) e o laço de tools
+    // CONTINUA depois da tool — devolvendo o relógio a `chamada_principal`. Se a
+    // devolução não existisse, todo o restante do laço cairia em `envio` e a
+    // chamada de IA apareceria com uns poucos segundos (medido em produção:
+    // `envio` 53,9s contra `chamada_principal` 6,8s num `agent_turn` de 60s).
+    const relogio = relogioFalso();
+    const medicao = criarMedicaoDeFases({ log: logDeTeste(), agora: relogio.agora });
+
+    medicao.marcar('contexto');
+    relogio.avancar(400);
+    medicao.marcar('chamada_principal');
+    relogio.avancar(6_000); // 1ª passagem: o modelo decide e chama send_message
+    medicao.marcar('envio');
+    relogio.avancar(2_500); // pausa humana + cadeia de gates + rede do canal
+    medicao.marcar('chamada_principal'); // devolve o relógio ao modelo
+    relogio.avancar(52_000); // restante do laço de tools da chamada principal
+
+    const resumo = medicao.resumo()!;
+    // A chamada principal soma as DUAS passagens (6s + 52s), não só a primeira.
+    expect(resumo.fases_ms.chamada_principal).toBe(58_000);
+    expect(resumo.fases_ms.envio).toBe(2_500);
+    // As fases são um recorte DISJUNTO do turno: a soma fecha com o total.
+    const soma = Object.values(resumo.fases_ms).reduce((a, b) => a + (b ?? 0), 0);
+    expect(soma).toBe(resumo.total_ms);
+    expect(resumo.total_ms).toBe(60_900);
+  });
+
   it("resumo() é idempotente e não devolve um segundo relatório", () => {
     const medicao = criarMedicaoDeFases({ log: logDeTeste(), agora: relogioFalso().agora });
     medicao.marcar('preparo');
@@ -270,7 +299,12 @@ describe("fiação — as fases do turno são marcadas no lugar certo", () => {
     expect(principal).toBeGreaterThan(-1);
     expect(checkpoint).toBeGreaterThan(principal);
 
-    const marcaPrincipal = FONTE_INBOUND.indexOf("marcar('chamada_principal')");
+    // A marcação de ABERTURA é a ÚLTIMA antes do `runModelCall`: `chamada_principal`
+    // passou a ter uma SEGUNDA marcação (o fecho do `envio`, dentro do
+    // `send_message`) para devolver o relógio ao modelo — ver o teste de
+    // correspondência logo abaixo. `indexOf` encontraria o fecho primeiro e
+    // apontaria para o lugar errado.
+    const marcaPrincipal = FONTE_INBOUND.lastIndexOf("marcar('chamada_principal')", principal);
     const marcaEnvio = FONTE_INBOUND.indexOf("marcar('envio')");
     const marcaCheckpoint = FONTE_INBOUND.indexOf("marcar('checkpoint')");
     expect(marcaPrincipal).toBeGreaterThan(-1);
@@ -290,6 +324,33 @@ describe("fiação — as fases do turno são marcadas no lugar certo", () => {
     expect(marcaEnvio).toBeLessThan(constroiEAbertura);
     expect(marcaPrincipal).toBeGreaterThan(constroiEAbertura);
     expect(marcaEnvio).toBeLessThan(marcaCheckpoint);
+  });
+
+  it("a fase `envio` FECHA dentro da própria tool — a chamada de IA não cai na conta dela", () => {
+    // A tool roda DENTRO do `runModelCall` principal (o SDK executa as tools
+    // entre os steps do modelo). Abrir `envio` no prelúdio e NÃO devolver o
+    // relógio ao modelo jogaria todo o restante do laço de tools — as próximas
+    // chamadas de modelo — na fase `envio`. Foi o defeito medido em produção
+    // (`envio` 53,9s contra `chamada_principal` 6,8s). O fecho é o
+    // `marcar('chamada_principal')` no `finally` do `send_message`, e a `marcar`
+    // ACUMULA de volta na fase certa.
+    const inicioSendMessage = FONTE_INBOUND.indexOf('send_message: tool({');
+    const inicioProximaTool = FONTE_INBOUND.indexOf('update_lead_state: tool({');
+    expect(inicioSendMessage).toBeGreaterThan(-1);
+    expect(inicioProximaTool).toBeGreaterThan(inicioSendMessage);
+    const corpo = FONTE_INBOUND.slice(inicioSendMessage, inicioProximaTool);
+
+    const abreEnvio = corpo.indexOf("marcar('envio')");
+    const voltaAoModelo = corpo.indexOf("marcar('chamada_principal')");
+    expect(abreEnvio).toBeGreaterThan(-1);
+    // A devolução do relógio existe e vem DEPOIS da abertura.
+    expect(voltaAoModelo).toBeGreaterThan(abreEnvio);
+    // ... e está num `finally` — o que a garante em veto (nada é enviado),
+    // erro e re-run do fail-safe, sem deixar fase aberta sem fechar.
+    expect(corpo.slice(0, voltaAoModelo)).toContain('} finally {');
+    // As DUAS pontas são guardadas por `!preview`: preview não abre nem fecha.
+    expect(corpo.slice(abreEnvio - 60, abreEnvio)).toContain('!preview');
+    expect(corpo.slice(voltaAoModelo - 40, voltaAoModelo)).toContain('!preview');
   });
 
   it("a espera humana é medida com o relógio do turno, não com um segundo relógio", () => {

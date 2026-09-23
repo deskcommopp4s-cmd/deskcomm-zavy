@@ -3081,6 +3081,16 @@ async function executarTurnoDoAgente(
         // seq só avança quando o envio é de fato tentado (gate veto não gasta seq
         // — preserva o alinhamento (job_id, seq) do ledger F2-06 entre re-runs).
         try {
+          // A fase `envio` abre AQUI: é o instante em que o turno passa a TENTAR
+          // falar com o lead — a partir daqui correm a pausa humana sobreposta, a
+          // cadeia de gates e a rede do canal. Fecha no `finally` DESTE mesmo try
+          // (logo abaixo), que devolve o relógio ao modelo. A devolução é
+          // obrigatória porque esta tool roda DENTRO do `runModelCall` principal
+          // (o SDK executa as tools entre os steps): sem ela, todo o restante do
+          // laço de tools — as próximas chamadas de modelo — cairia na conta do
+          // envio. Foi o defeito medido em produção: `envio` 53,9s contra
+          // `chamada_principal` 6,8s num `agent_turn` de 60s, num turno de 77,6s.
+          if (!preview) medicaoDoTurno?.marcar('envio');
           // Wave 4 (spec 15 §10.2): estado de caso lido FRESCO a cada tentativa de envio
           // (pode ter mudado dentro deste MESMO turno via open_human_case, chamado antes
           // deste send_message). casesEnabled false (tela não habilita) → sempre false,
@@ -3241,12 +3251,6 @@ async function executarTurnoDoAgente(
                 },
               }),
           };
-          // A fase `envio` abre AQUI: é o instante em que o turno passa a tentar
-          // falar com o lead — a partir daqui correm a pausa humana e a cadeia de
-          // gates. (Antes, ela abria no FIM da pausa, o que deixava de fora a
-          // própria pausa e os gates; o comentário do fechamento, ~3860, dizia o
-          // contrário do que o código fazia.)
-          if (!preview) medicaoDoTurno?.marcar('envio');
           // A sobreposição começa AQUI, imediatamente antes da cadeia: a pausa
           // humana não depende de nenhum veredito de gate (só do texto), então
           // pode correr junto. `jaEsperouComoHumano` garante a pausa única por
@@ -3450,6 +3454,15 @@ async function executarTurnoDoAgente(
               message: 'erro interno no envio — encerre o turno agora.',
             },
           };
+        } finally {
+          // A fase `envio` FECHA AQUI — e o `finally` é o que garante que abre e
+          // fecha se correspondam em TODOS os caminhos: envio efetivado, veto
+          // (nada sai), erro e re-run do fail-safe. Uma fase aberta e nunca
+          // fechada corromperia o número. Remarcar `chamada_principal` reabre a
+          // fase do MODELO (a `marcar` ACUMULA, não sobrescreve), devolvendo a
+          // ele o restante do laço de tools. Em preview a fase nem abriu
+          // (`!preview` na abertura), então aqui também não reabre.
+          if (!preview) medicaoDoTurno?.marcar('chamada_principal');
         }
       },
     }),
@@ -4265,8 +4278,9 @@ async function executarTurnoDoAgente(
     // checkpoint e sem dono, e o próximo inbound cairia no mesmo bloqueio, agora
     // sem nada tendo mudado no meio.
     //
-    // A fase `envio` fecha AQUI: o `runModelCall` da chamada principal é quem
-    // executa o `send_message`, e portanto a espera humana e a rede do canal.
+    // A fase `envio` JÁ FECHOU lá atrás, no `finally` do `send_message` (que
+    // devolveu o relógio ao modelo — ver o porquê lá). A partir daqui é a 2ª
+    // chamada de modelo do turno, que é retaguarda e NÃO fala com o lead.
     medicaoDoTurno?.marcar('checkpoint');
     const closing = await runModelCall(
       pool,
