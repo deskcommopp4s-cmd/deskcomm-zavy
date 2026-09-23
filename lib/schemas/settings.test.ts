@@ -5,6 +5,8 @@ import {
   tenantSchema,
   notificationPrefsSchema,
   pipelineConfigPatchSchema,
+  clientePelaAgendaLigado,
+  regressaoDeFunilAtivada,
 } from "./settings";
 
 describe("profileSchema", () => {
@@ -148,5 +150,25 @@ describe("pipelineConfigPatchSchema", () => {
       lost_reasons: ["Concorrente", "Preço"],
     });
     expect(r.success).toBe(true);
+  });
+});
+
+describe("regras de crm por organização (organizations.settings.crm)", () => {
+  it("regressão de funil nasce DESLIGADA e só o booleano true liga", () => {
+    expect(regressaoDeFunilAtivada(null)).toBe(false);
+    expect(regressaoDeFunilAtivada({})).toBe(false);
+    expect(regressaoDeFunilAtivada({ crm: {} })).toBe(false);
+    expect(regressaoDeFunilAtivada({ crm: { regressao_de_funil_ativada: false } })).toBe(false);
+    // A string "true" NÃO liga — mesma régua do cliente_pela_agenda.
+    expect(regressaoDeFunilAtivada({ crm: { regressao_de_funil_ativada: "true" } })).toBe(false);
+    expect(regressaoDeFunilAtivada({ crm: { regressao_de_funil_ativada: true } })).toBe(true);
+    // `crm` que não é objeto é lixo, não derruba.
+    expect(regressaoDeFunilAtivada({ crm: "x" })).toBe(false);
+  });
+
+  it("as duas chaves de crm convivem sem se apagarem", () => {
+    const settings = { crm: { cliente_pela_agenda: true, regressao_de_funil_ativada: true } };
+    expect(clientePelaAgendaLigado(settings)).toBe(true);
+    expect(regressaoDeFunilAtivada(settings)).toBe(true);
   });
 });

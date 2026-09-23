@@ -4,7 +4,9 @@ import { requireAuth, resolveActiveOrg } from "@/lib/auth/server";
 import { ROLE_RANK } from "@/lib/auth/types";
 import { createClient } from "@/lib/supabase/server";
 import { PipelinesClient, type PipelineRow } from "./_client";
+import { RegressaoDeFunil } from "./_regressao";
 import { traduzir } from "@/lib/i18n/dicionario";
+import { regressaoDeFunilAtivada } from "@/lib/schemas/settings";
 
 export const dynamic = "force-dynamic";
 
@@ -32,6 +34,17 @@ export default async function PipelinesSettingsPage() {
     (user.is_platform_admin && !user.support) || ROLE_RANK[activeOrg.role] >= ROLE_RANK.admin;
 
   const supabase = await createClient();
+  // A regressão é uma chave POR ORGANIZAÇÃO (`settings.crm`). A leitura RLS do
+  // próprio tenant basta; a escrita é que passa pela server action (admin).
+  const { data: orgRow } = await supabase
+    .from("organizations")
+    .select("settings")
+    .eq("id", activeOrg.orgId)
+    .maybeSingle();
+  const regressaoLigada = regressaoDeFunilAtivada(
+    (orgRow as { settings?: unknown } | null)?.settings,
+  );
+
   const { data } = await supabase
     .from("crm_pipelines")
     .select("id, name, slug, vocabulary, settings")
@@ -56,6 +69,7 @@ export default async function PipelinesSettingsPage() {
           .
         </p>
       </header>
+      <RegressaoDeFunil ligadaInicial={regressaoLigada} podeLigar={podeEditarConfig} />
       <PipelinesClient pipelines={pipelines} podeEditarConfig={podeEditarConfig} />
     </div>
   );

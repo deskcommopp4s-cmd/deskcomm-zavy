@@ -54,7 +54,8 @@ import {
   type PerguntaTypeSafe,
   type RespostaTypeSafe,
 } from "@/lib/ai/decisao/typesafe";
-import { byteaToBuffer, decryptKey } from "@/lib/crypto/aes_gcm";
+import { resolverChaveDoProvedorDeDecisao } from "@/lib/ai/decisao/credencial-de-plataforma";
+import { regressaoDeFunilAtivada } from "@/lib/schemas/settings";
 import { buildLeadActivityRow } from "@/lib/leads/activity-emitter";
 import { resolveActiveLeadForContact, type LeadCandidate } from "@/lib/leads/active-lead";
 import { sincronizaEstagioDoAgente, razaoDaMudancaPeloAgente } from "@/lib/leads/agent-stage-sync";
@@ -218,7 +219,68 @@ export function proximoPassoValido(atual: LeadStage, alvo: LeadStage): LeadStage
   return null;
 }
 
-/* ────────────────────────── interruptores ────────────────────────── */
+/**
+ * O passo VÁLIDO para TRÁS, um por vez (BFS no grafo INVERSO). Devolve o
+ * PRIMEIRO passo do caminho de volta — nunca um salto, exatamente como
+ * `proximoPassoValido` faz para frente.
+ *
+ * ── Quando isto roda ────────────────────────────────────────────────────────
+ *
+ * Só quando o admin da organização LIGOU a regressão de funil
+ * (`organizations.settings.crm.regressao_de_funil_ativada`, default false). Com
+ * a regressão desligada este caminho nem é chamado e o comportamento é idêntico
+ * ao de hoje: o classificador de etapa assume e o card não anda para trás.
+ *
+ * ── O que "válido" quer dizer ───────────────────────────────────────────────
+ *
+ * Um passo para trás é válido quando a ida correspondente é válida em
+ * `LEAD_STAGE_TRANSITIONS` — andar de `qualified` para `qualifying` vale porque
+ * `qualifying → qualified` é uma transição de avanço. Não é "pular para
+ * qualquer lugar": um alvo que não é ancestral de `atual` devolve `null` e nada
+ * é movido.
+ */
+export function passoRegressivoValido(atual: LeadStage, alvo: LeadStage): LeadStage | null {
+  if (atual === alvo) return null;
+  // Predecessores de um estágio: quem tem esse estágio como avanço válido.
+  const predecessores = (no: LeadStage): readonly LeadStage[] =>
+    LEAD_STAGES.filter((p) => LEAD_STAGE_TRANSITIONS[p].includes(no));
+  const visitados = new Set<LeadStage>([atual]);
+  const fila: Array<{ no: LeadStage; primeiro: LeadStage | null }> = [{ no: atual, primeiro: null }];
+  while (fila.length > 0) {
+    const { no, primeiro } = fila.shift()!;
+    for (const anterior of predecessores(no)) {
+      if (visitados.has(anterior)) continue;
+      const passoInicial = primeiro ?? anterior;
+      if (anterior === alvo) return passoInicial;
+      visitados.add(anterior);
+      fila.push({ no: anterior, primeiro: passoInicial });
+    }
+  }
+  return null;
+}
+
+/**
+ * A escolha do passo, com a regressão no lugar certo. Pura e testável.
+ *
+ * 1. Anda para FRENTE sempre que houver caminho (`proximoPassoValido`).
+ * 2. Sem caminho e com a regressão DESLIGADA (default) ⇒ `null`: nada é movido,
+ *    idêntico ao comportamento de hoje.
+ * 3. Sem caminho e com a regressão LIGADA ⇒ o primeiro passo válido para trás
+ *    (`passoRegressivoValido`), ou `null` se o alvo não é ancestral.
+ *
+ * `regressao` sai junto porque a máquina de estados só aceita a volta quando ela
+ * é pedida EXPLICITAMENTE — o avanço continua passando sem flag.
+ */
+export function escolherPasso(
+  atual: LeadStage,
+  alvo: LeadStage,
+  permitirRegressao: boolean,
+): { passo: LeadStage | null; regressao: boolean } {
+  const paraFrente = proximoPassoValido(atual, alvo);
+  if (paraFrente !== null) return { passo: paraFrente, regressao: false };
+  if (!permitirRegressao) return { passo: null, regressao: false };
+  return { passo: passoRegressivoValido(atual, alvo), regressao: true };
+}
 
 /**
  * O kill switch GLOBAL do superadmin vive em `platform_settings.qualificacao_jev_ativa`
@@ -239,34 +301,65 @@ export async function lerInterruptorGlobal(db: pg.Pool): Promise<boolean> {
   }
 }
 
-/** A chave do provedor de decisão, decifrada do mesmo cofre das chaves de LLM. */
-export async function lerCredencialDoProvedor(
+/* ────────────────────────── interruptores ────────────────────────── */
+
+/**
+ * NÍVEL 2 (o superadmin libera a feature por organização). Lê
+ * `organizations.qualificacao_jev_ativa` (migration 0267).
+ *
+ * Default `false` e ausência da coluna valem DESLIGADO: ninguém ganha a
+ * funcionalidade sem que o superadmin a libere. É o oposto do kill switch global
+ * (que nasce ligado) de propósito — lá o default protege a operação, aqui
+ * protege quem nunca pediu a feature de a ver aparecendo sozinha.
+ */
+export async function lerHabilitacaoDaOrganizacao(
   db: pg.Pool,
   organizationId: string,
-  credentialId: string,
-): Promise<string | null> {
-  const { rows } = await db.query<{
-    api_key_encrypted: unknown;
-    api_key_iv: unknown;
-    api_key_tag: unknown;
-  }>(
-    `select api_key_encrypted, api_key_iv, api_key_tag
-       from ai_provider_credentials
-      where id = $1 and organization_id = $2 and is_active
-      limit 1`,
-    [credentialId, organizationId],
-  );
-  const row = rows[0];
-  if (row === undefined) return null;
+): Promise<boolean> {
   try {
-    return decryptKey({
-      ciphertext: byteaToBuffer(row.api_key_encrypted),
-      iv: byteaToBuffer(row.api_key_iv),
-      tag: byteaToBuffer(row.api_key_tag),
-    });
+    const { rows } = await db.query<{ ativa: boolean | null }>(
+      "select qualificacao_jev_ativa from organizations where id = $1",
+      [organizationId],
+    );
+    return rows[0]?.ativa === true;
   } catch {
-    return null;
+    // Clone que ainda não aplicou a 0267: sem coluna, desligado.
+    return false;
   }
+}
+
+/**
+ * A regressão de funil está ligada nesta organização?
+ * `organizations.settings.crm.regressao_de_funil_ativada` — default false.
+ * Nunca lança: leitura que falha vale desligado (não regride).
+ */
+export async function lerRegressaoDeFunilDaOrganizacao(
+  db: pg.Pool,
+  organizationId: string,
+): Promise<boolean> {
+  try {
+    const { rows } = await db.query<{ settings: unknown }>(
+      "select settings from organizations where id = $1",
+      [organizationId],
+    );
+    return regressaoDeFunilAtivada(rows[0]?.settings);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * A chave do provedor de decisão pela ESCADA da plataforma: cofre da instalação
+ * (`platform_decision_credentials`, 0267) → ambiente (`TYPESAFE_API_KEY`).
+ *
+ * Substitui a leitura BYOK de `ai_provider_credentials`: por decisão do dono, a
+ * chave agora é da INSTALAÇÃO e é cadastrada UMA vez pelo superadmin.
+ */
+export async function lerCredencialDaPlataforma(
+  db: pg.Pool,
+  provider: string,
+): Promise<string | null> {
+  return resolverChaveDoProvedorDeDecisao(db, provider);
 }
 
 /** Grava a execução do provedor de decisão em `llm_calls` (o `registraEm` do ponto). */
@@ -324,6 +417,12 @@ export interface AplicacaoArgs {
   dimensoes: DimensoesDaQualificacao;
   llmCallId: string | null;
   log: Logger;
+  /**
+   * O admin da organização ligou a regressão de funil? Default `false` — o
+   * comportamento de hoje (só avança). Ligado, o alvo atrás do atual vira UM
+   * passo para trás válido.
+   */
+  permitirRegressao?: boolean;
 }
 
 export type ResultadoDaAplicacao = {
@@ -444,13 +543,21 @@ export async function aplicarQualificacaoPadrao(
     });
   }
 
-  const passo = proximoPassoValido(currentStage, alvo);
+  // O caminho de ida tem prioridade. Sem ele, e com a regressão LIGADA, o alvo
+  // atrás do atual vira UM passo válido para trás (BFS no grafo inverso). Com a
+  // regressão desligada (default), `passo` continua `null` e nada é movido —
+  // exatamente o comportamento de hoje.
+  const { passo, regressao } = escolherPasso(currentStage, alvo, args.permitirRegressao === true);
   if (passo === null) return { movido: false, motivo: "transicao_invalida", leadId };
 
   const transicao = await applyLeadStateUpdate(
     pool,
     { tenantId: organizationId, leadId: contactId, jobId },
     { stage: passo, reason: `qualificação automática (JEV): ${currentStage} → ${passo}` },
+    // A máquina de estados só aceita regressão quando ela foi pedida EXPLICITAMENTE
+    // aqui. O avanço continua sendo aceito sem flag — o caminho do modelo
+    // (`update_lead_state`) não passa por este parâmetro e segue inalterado.
+    regressao ? { permitirRegressao: true } : {},
   );
   if (!transicao.ok) {
     log.warn("qualificação JEV: a máquina de estados recusou o avanço", {
@@ -523,6 +630,8 @@ export interface EntradaDaQualificacao {
 export type MotivoNaoUsado =
   | "sem_contato"
   | "desligado_global"
+  /** NÍVEL 2: o superadmin não liberou a feature para esta organização. */
+  | "desligado_pelo_superadmin"
   | "desligado_org"
   | "provedor_desconhecido"
   | "sem_credencial"
@@ -543,12 +652,16 @@ export interface DepsDaQualificacao {
   fetchImpl?: typeof fetch;
   sleep?: (ms: number) => Promise<void>;
   lerGlobal?: (db: pg.Pool) => Promise<boolean>;
+  /** NÍVEL 2 — o superadmin liberou a feature para esta organização? */
+  lerHabOrg?: (db: pg.Pool, organizationId: string) => Promise<boolean>;
   lerBindingDoPonto?: (db: pg.Pool, organizationId: string) => Promise<LinhaDeBinding | null>;
-  lerCredencial?: (
-    db: pg.Pool,
-    organizationId: string,
-    credentialId: string,
-  ) => Promise<string | null>;
+  /**
+   * A chave do provedor de decisão, por PROVIDER (cofre da instalação → env).
+   * Não recebe mais `credentialId`: a chave deixou de ser BYOK.
+   */
+  lerCredencial?: (db: pg.Pool, provider: string) => Promise<string | null>;
+  /** A regressão de funil está ligada nesta organização? Default false. */
+  lerRegressao?: (db: pg.Pool, organizationId: string) => Promise<boolean>;
   aplicar?: (args: AplicacaoArgs) => Promise<ResultadoDaAplicacao>;
 }
 
@@ -568,15 +681,24 @@ export async function qualificarLeadComJev(
   }
 
   const lerGlobal = deps.lerGlobal ?? lerInterruptorGlobal;
+  const lerHabOrg = deps.lerHabOrg ?? lerHabilitacaoDaOrganizacao;
   const lerBinding =
     deps.lerBindingDoPonto ??
     ((db, organizationId) => carregarBinding(db, organizationId, PONTO_QUALIFICACAO));
-  const lerCredencial = deps.lerCredencial ?? lerCredencialDoProvedor;
+  const lerCredencial = deps.lerCredencial ?? lerCredencialDaPlataforma;
+  const lerRegressao = deps.lerRegressao ?? lerRegressaoDeFunilDaOrganizacao;
   const aplicar = deps.aplicar ?? aplicarQualificacaoPadrao;
 
   try {
+    // NÍVEL 1 — o kill switch GLOBAL do superadmin.
     if (!(await lerGlobal(entrada.pool))) return { usado: false, motivo: "desligado_global" };
 
+    // NÍVEL 2 — o superadmin liberou a feature para ESTA organização?
+    if (!(await lerHabOrg(entrada.pool, entrada.organizationId))) {
+      return { usado: false, motivo: "desligado_pelo_superadmin" };
+    }
+
+    // NÍVEL 3 — a conta ligou o binding do ponto (e escolheu o provedor).
     const binding = await lerBinding(entrada.pool, entrada.organizationId);
     if (binding === null || !binding.is_enabled) return { usado: false, motivo: "desligado_org" };
 
@@ -584,13 +706,10 @@ export async function qualificarLeadComJev(
     if (provedor === undefined) {
       return { usado: false, motivo: "provedor_desconhecido", detalhe: binding.provider };
     }
-    if (binding.credential_id === null) return { usado: false, motivo: "sem_credencial" };
 
-    const apiKey = await lerCredencial(
-      entrada.pool,
-      entrada.organizationId,
-      binding.credential_id,
-    );
+    // A chave é da INSTALAÇÃO: vem do cofre de plataforma (ou do ambiente). O
+    // `credential_id` do binding deixou de ser a fonte — não é mais BYOK.
+    const apiKey = await lerCredencial(entrada.pool, binding.provider);
     if (apiKey === null) return { usado: false, motivo: "sem_credencial" };
 
     const inicio = Date.now();
@@ -636,6 +755,10 @@ export async function qualificarLeadComJev(
       latencyMs: Date.now() - inicio,
     });
 
+    // A regressão é decisão do admin da CONTA (default false). Ela só afeta a
+    // APLICAÇÃO (andar para trás); não interfere em quando o Jev é usado.
+    const permitirRegressao = await lerRegressao(entrada.pool, entrada.organizationId);
+
     const aplicado = await aplicar({
       pool: entrada.pool,
       admin: entrada.admin,
@@ -648,6 +771,7 @@ export async function qualificarLeadComJev(
       dimensoes,
       llmCallId,
       log,
+      permitirRegressao,
     });
 
     return {

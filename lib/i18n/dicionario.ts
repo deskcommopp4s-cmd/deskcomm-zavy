@@ -8916,6 +8916,52 @@ export const DICIONARIO: Traducoes = {
   "Um material marcado aqui foi arquivado no acervo — o agente não lê mais ele.": { es: "Un material marcado aquí fue archivado en el acervo — el agente ya no lo lee." },
   "Materiais marcados aqui foram arquivados no acervo — o agente não lê mais eles.": { es: "Materiales marcados aquí fueron archivados en el acervo — el agente ya no los lee." },
   "Desmarque para voltar a salvar.": { es: "Desmárcalo para volver a guardar." },
+  // A tela da chave do provedor de decisão (JEV) da INSTALAÇÃO (`/admin/decisao`)
+  // e o interruptor por organização na ficha do tenant (migration 0267).
+  "Provedor de decisão (JEV)": { es: "Proveedor de decisión (JEV)" },
+  "É a inteligência que lê a conversa e move o funil do cliente. A chave é uma só para a instalação inteira — todas as empresas usam a mesma.": {
+    es: "Es la inteligencia que lee la conversación y mueve el embudo del cliente. La clave es una sola para toda la instalación: todas las empresas usan la misma.",
+  },
+  "Chave da API": { es: "Clave de la API" },
+  "apikey_…": { es: "apikey_…" },
+  "A chave é guardada cifrada e nunca volta a aparecer nesta tela.": {
+    es: "La clave se guarda cifrada y nunca vuelve a aparecer en esta pantalla.",
+  },
+  "Onde pegar a chave:": { es: "Dónde obtener la clave:" },
+  "Esta instalação também tem uma chave no arquivo de configuração do servidor. O que você salvar aqui passa a valer no lugar dela.": {
+    es: "Esta instalación también tiene una clave en el archivo de configuración del servidor. Lo que guardes aquí pasa a valer en su lugar.",
+  },
+  "A chave parece incompleta. Cole a chave inteira, do começo ao fim.": {
+    es: "La clave parece incompleta. Pega la clave entera, de principio a fin.",
+  },
+  "Chave salva.": { es: "Clave guardada." },
+  "Qualificação do lead (JEV)": { es: "Calificación del lead (JEV)" },
+  "Liberar a qualificação do lead com o JEV para esta empresa": {
+    es: "Habilitar la calificación del lead con el JEV para esta empresa",
+  },
+  "Com isto ligado, a IA desta empresa pode usar o provedor de decisão para mover o funil. Depende também do interruptor geral da instalação e de a própria empresa ter ligado o ponto na conta dela.": {
+    es: "Con esto activado, la IA de esta empresa puede usar el proveedor de decisión para mover el embudo. También depende del interruptor general de la instalación y de que la propia empresa haya activado el punto en su cuenta.",
+  },
+  "Liberado: a empresa pode ligar a qualificação na conta dela.": {
+    es: "Habilitado: la empresa puede activar la calificación en su cuenta.",
+  },
+  "Não liberado: nenhuma IA desta empresa qualifica por decisão.": {
+    es: "No habilitado: ninguna IA de esta empresa califica por decisión.",
+  },
+  // O interruptor de REGRESSÃO DE FUNIL em Configurações › Etapas do funil.
+  "Regressão de funil": { es: "Regresión de embudo" },
+  "Deixar o agente voltar uma etapa quando o cliente retroceder": {
+    es: "Permitir que el agente vuelva una etapa cuando el cliente retroceda",
+  },
+  "Por padrão, o agente só avança o card no funil. Com isto ligado, ele pode trazer o card UM passo para trás quando a conversa mostrar que o cliente retrocedeu — por exemplo, voltar de “em negociação” para “qualificado”. Nunca é um salto: a volta respeita as etapas do funil, uma a uma.": {
+    es: "Por defecto, el agente solo avanza la tarjeta en el embudo. Con esto activado, puede traer la tarjeta UN paso atrás cuando la conversación muestre que el cliente retrocedió — por ejemplo, volver de «en negociación» a «calificado». Nunca es un salto: la vuelta respeta las etapas del embudo, una a una.",
+  },
+  "Ligado: o agente pode trazer o card um passo para trás quando o cliente retroceder.": {
+    es: "Activado: el agente puede traer la tarjeta un paso atrás cuando el cliente retroceda.",
+  },
+  "Desligado: o agente só avança o card, como sempre.": {
+    es: "Desactivado: el agente solo avanza la tarjeta, como siempre.",
+  },
 };
 
 /**

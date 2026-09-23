@@ -159,9 +159,17 @@ function buildSentinelRegex(keywords: string[]): RegExp | null {
  * lá não existe faria o ensaio passar e a mensagem real falhar.
  */
 export function chaveDePlataforma(provider: string): string | null {
-  const nome = { anthropic: "ANTHROPIC_API_KEY", openai: "OPENAI_API_KEY", openrouter: "OPENROUTER_API_KEY" }[
-    provider
-  ];
+  const nome = {
+    anthropic: "ANTHROPIC_API_KEY",
+    openai: "OPENAI_API_KEY",
+    openrouter: "OPENROUTER_API_KEY",
+    // Último degrau da escada do provedor de DECISÃO (Jev/TypeSafe): o cofre da
+    // instalação (`platform_decision_credentials`, migration 0267) vence, e na
+    // falta dele vale esta variável. Não é provedor de conversa, então a
+    // prateleira (`IDS_DE_PROVEDOR`) nunca o entrega a este mapa — a entrada só
+    // existe para a escada do ponto `qualificacao_do_lead` ter um piso de env.
+    typesafe: "TYPESAFE_API_KEY",
+  }[provider];
   if (!nome) return null;
   const v = (process.env[nome] ?? "").trim();
   return v === "" ? null : v;

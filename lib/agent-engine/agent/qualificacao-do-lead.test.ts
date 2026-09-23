@@ -7,7 +7,9 @@ import type * as agenteStageSync from "@/lib/leads/agent-stage-sync";
 import type { LinhaDeBinding } from "@/lib/ai/pontos/resolver";
 import {
   decidirEtapa,
+  escolherPasso,
   montarDimensoes,
+  passoRegressivoValido,
   proximoPassoValido,
   qualificarLeadComJev,
   type AplicacaoArgs,
@@ -177,6 +179,48 @@ describe("proximoPassoValido — só anda para frente, um passo por vez", () => 
   });
 });
 
+describe("passoRegressivoValido + escolherPasso — a regressão de funil", () => {
+  it("devolve o PRIMEIRO passo de volta (BFS inverso), nunca o salto", () => {
+    expect(passoRegressivoValido("negotiating", "qualifying")).toBe("qualified");
+    expect(passoRegressivoValido("qualified", "contacted")).toBe("qualifying");
+    // `lost` tem vários predecessores válidos; ir para `qualified` é um passo
+    // direto porque `qualified → lost` é transição de avanço.
+    expect(passoRegressivoValido("lost", "qualified")).toBe("qualified");
+    expect(passoRegressivoValido("won", "negotiating")).toBe("negotiating");
+  });
+
+  it("recusa alvo que não é ancestral (salto inválido) e o no-op", () => {
+    expect(passoRegressivoValido("qualifying", "lost")).toBeNull();
+    expect(passoRegressivoValido("new", "negotiating")).toBeNull();
+    expect(passoRegressivoValido("contacted", "contacted")).toBeNull();
+  });
+
+  it("(c) regressão DESLIGADA (default) ⇒ não regride", () => {
+    expect(escolherPasso("negotiating", "qualifying", false)).toEqual({
+      passo: null,
+      regressao: false,
+    });
+  });
+
+  it("(d) regressão LIGADA ⇒ regride por UM passo válido, e recusa o salto inválido", () => {
+    expect(escolherPasso("negotiating", "qualifying", true)).toEqual({
+      passo: "qualified",
+      regressao: true,
+    });
+    // Alvo inalcançável em qualquer direção (`won` é terminal e `lost` não é seu
+    // ancestral): nada é movido mesmo com a regressão ligada.
+    expect(escolherPasso("won", "lost", true)).toEqual({
+      passo: null,
+      regressao: true,
+    });
+    // O caminho de IDA continua tendo prioridade — não vira regressão.
+    expect(escolherPasso("contacted", "qualified", true)).toEqual({
+      passo: "qualifying",
+      regressao: false,
+    });
+  });
+});
+
 describe("montarDimensoes", () => {
   it("extrai as cinco dimensões tipadas", () => {
     expect(montarDimensoes(respostasJev())).toEqual({
@@ -217,6 +261,9 @@ describe("qualificarLeadComJev", () => {
 
     const semBinding = await qualificarLeadComJev(entrada(pool), {
       lerGlobal: async () => true,
+      // NÍVEL 2: a mudança acrescentou esta porta ao contrato de deps; os testes
+      // que medem os níveis 1 e 3 a deixam ABERTA para isolar o que medem.
+      lerHabOrg: async () => true,
       lerBindingDoPonto: async () => null,
       fetchImpl: fetchImpl as unknown as typeof fetch,
     });
@@ -224,6 +271,9 @@ describe("qualificarLeadComJev", () => {
 
     const desabilitado = await qualificarLeadComJev(entrada(pool), {
       lerGlobal: async () => true,
+      // NÍVEL 2: a mudança acrescentou esta porta ao contrato de deps; os testes
+      // que medem os níveis 1 e 3 a deixam ABERTA para isolar o que medem.
+      lerHabOrg: async () => true,
       lerBindingDoPonto: async () => ({ ...BINDING, is_enabled: false }),
       fetchImpl: fetchImpl as unknown as typeof fetch,
     });
@@ -244,6 +294,9 @@ describe("qualificarLeadComJev", () => {
 
     const r = await qualificarLeadComJev(entrada(pool), {
       lerGlobal: async () => true,
+      // NÍVEL 2: a mudança acrescentou esta porta ao contrato de deps; os testes
+      // que medem os níveis 1 e 3 a deixam ABERTA para isolar o que medem.
+      lerHabOrg: async () => true,
       lerBindingDoPonto: async () => BINDING,
       lerCredencial: async () => "chave",
       fetchImpl: (async () => bodyJev(respostasJev({ etapa: "contacted", pronto: 0.83 }))) as unknown as typeof fetch,
@@ -276,6 +329,9 @@ describe("qualificarLeadComJev", () => {
 
     const r = await qualificarLeadComJev(entrada(pool), {
       lerGlobal: async () => true,
+      // NÍVEL 2: a mudança acrescentou esta porta ao contrato de deps; os testes
+      // que medem os níveis 1 e 3 a deixam ABERTA para isolar o que medem.
+      lerHabOrg: async () => true,
       lerBindingDoPonto: async () => BINDING,
       lerCredencial: async () => "chave",
       fetchImpl: (async () => {
@@ -294,6 +350,9 @@ describe("qualificarLeadComJev", () => {
 
     const semCred = await qualificarLeadComJev(entrada(pool), {
       lerGlobal: async () => true,
+      // NÍVEL 2: a mudança acrescentou esta porta ao contrato de deps; os testes
+      // que medem os níveis 1 e 3 a deixam ABERTA para isolar o que medem.
+      lerHabOrg: async () => true,
       lerBindingDoPonto: async () => BINDING,
       lerCredencial: async () => null,
       fetchImpl: vi.fn() as unknown as typeof fetch,
@@ -302,12 +361,18 @@ describe("qualificarLeadComJev", () => {
 
     const outroProvedor = await qualificarLeadComJev(entrada(pool), {
       lerGlobal: async () => true,
+      // NÍVEL 2: a mudança acrescentou esta porta ao contrato de deps; os testes
+      // que medem os níveis 1 e 3 a deixam ABERTA para isolar o que medem.
+      lerHabOrg: async () => true,
       lerBindingDoPonto: async () => ({ ...BINDING, provider: "openai" }),
     });
     expect(outroProvedor).toMatchObject({ usado: false, motivo: "provedor_desconhecido" });
 
     const indefinida = await qualificarLeadComJev(entrada(pool), {
       lerGlobal: async () => true,
+      // NÍVEL 2: a mudança acrescentou esta porta ao contrato de deps; os testes
+      // que medem os níveis 1 e 3 a deixam ABERTA para isolar o que medem.
+      lerHabOrg: async () => true,
       lerBindingDoPonto: async () => BINDING,
       lerCredencial: async () => "chave",
       fetchImpl: (async () => bodyJev(respostasJev({ confianca: 0.05 }))) as unknown as typeof fetch,
@@ -327,6 +392,9 @@ describe("qualificarLeadComJev", () => {
 
     const r = await qualificarLeadComJev(entrada(pool), {
       lerGlobal: async () => true,
+      // NÍVEL 2: a mudança acrescentou esta porta ao contrato de deps; os testes
+      // que medem os níveis 1 e 3 a deixam ABERTA para isolar o que medem.
+      lerHabOrg: async () => true,
       lerBindingDoPonto: async () => BINDING,
       lerCredencial: async () => "chave",
       // etapa "qualified" e pronto 0,83: de "qualifying" o passo é "qualified".
@@ -349,5 +417,79 @@ describe("qualificarLeadComJev", () => {
 
     const espelho = mocks.sincronizaEstagioDoAgente.mock.calls[0]![1] as { passo: string };
     expect(espelho.passo).toBe("qualifying");
+  });
+
+  it("(a) NÍVEL 2 desligado (superadmin não liberou) ⇒ usado:false e o JEV nem é chamado", async () => {
+    const { pool } = poolFake();
+    const fetchImpl = vi.fn();
+    const r = await qualificarLeadComJev(entrada(pool), {
+      lerGlobal: async () => true,
+      lerHabOrg: async () => false,
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    expect(r).toEqual({ usado: false, motivo: "desligado_pelo_superadmin" });
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("(b) os TRÊS níveis ligados ⇒ usa o JEV", async () => {
+    const { pool } = poolFake();
+    const fetchImpl = vi.fn(async () => bodyJev(respostasJev({ etapa: "contacted", pronto: 0.83 })));
+    const r = await qualificarLeadComJev(entrada(pool), {
+      lerGlobal: async () => true,
+      lerHabOrg: async () => true,
+      lerBindingDoPonto: async () => BINDING,
+      lerCredencial: async () => "chave",
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      sleep: async () => {},
+    });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(r).toMatchObject({ usado: true, etapa: "qualified", passo: "qualifying" });
+  });
+
+  it("(c) regressão DESLIGADA (default) ⇒ o alvo atrás do atual NÃO move o card", async () => {
+    const { pool } = poolFake();
+    // `BINDING` + credencial OK; a resposta manda `qualifying`, atrás do atual
+    // `negotiating`. Sem a regressão ligada, `movido:false` e nada é aplicado.
+    const r = await qualificarLeadComJev({ ...entrada(pool), currentStage: "negotiating" }, {
+      lerGlobal: async () => true,
+      lerHabOrg: async () => true,
+      lerBindingDoPonto: async () => BINDING,
+      lerCredencial: async () => "chave",
+      lerRegressao: async () => false,
+      fetchImpl: (async () => bodyJev(respostasJev({ etapa: "qualifying", pronto: 0.1 }))) as unknown as typeof fetch,
+      sleep: async () => {},
+    });
+    expect(r).toMatchObject({ usado: true, movido: false, motivo: "transicao_invalida" });
+  });
+
+  it("(d) regressão LIGADA ⇒ regride UM passo válido", async () => {
+    const { pool } = poolFake();
+    const r = await qualificarLeadComJev({ ...entrada(pool), currentStage: "negotiating" }, {
+      lerGlobal: async () => true,
+      lerHabOrg: async () => true,
+      lerBindingDoPonto: async () => BINDING,
+      lerCredencial: async () => "chave",
+      lerRegressao: async () => true,
+      fetchImpl: (async () => bodyJev(respostasJev({ etapa: "qualifying", pronto: 0.1 }))) as unknown as typeof fetch,
+      sleep: async () => {},
+    });
+    expect(r).toMatchObject({ usado: true, movido: true, etapa: "qualifying", passo: "qualified" });
+  });
+
+  it("(e) a chave vem do cofre da plataforma (banco) ANTES do ambiente", async () => {
+    const { pool } = poolFake();
+    const lerCredencial = vi.fn(async () => "chave-do-cofre");
+    const r = await qualificarLeadComJev(entrada(pool), {
+      lerGlobal: async () => true,
+      lerHabOrg: async () => true,
+      lerBindingDoPonto: async () => BINDING,
+      lerCredencial,
+      fetchImpl: (async () => bodyJev(respostasJev({ etapa: "contacted" }))) as unknown as typeof fetch,
+      sleep: async () => {},
+    });
+    // A dep é chamada por PROVIDER (não mais por credentialId): a chave deixou
+    // de ser BYOK. O default (`lerCredencialDaPlataforma`) resolve cofre → env.
+    expect(lerCredencial).toHaveBeenCalledWith(pool, "typesafe");
+    expect(r).toMatchObject({ usado: true });
   });
 });
