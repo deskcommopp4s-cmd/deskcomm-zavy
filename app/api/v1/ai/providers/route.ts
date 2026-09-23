@@ -29,6 +29,10 @@ import {
 } from "@/lib/ai/pontos/resolver";
 import { PAPEIS, PONTOS_DE_IA, PONTO_POR_ID } from "@/lib/ai/pontos/registro";
 import { PROVEDORES, ehProvedorSuportado } from "@/lib/ai/pontos/provedores";
+import {
+  ehProvedorDeDecisao,
+  PROVEDORES_DE_DECISAO,
+} from "@/lib/ai/pontos/provedores-de-decisao";
 import { validarBinding } from "@/lib/ai/pontos/validar-binding";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
@@ -194,6 +198,10 @@ export async function GET(): Promise<Response> {
     // mostrá-lo nem trocá-lo (invariante 6: toda configuração tem superfície).
     padrao: padraoDaOrganizacao,
     provedores: PROVEDORES,
+    // A prateleira PARALELA: provedores de decisão (Jev/TypeSafe), que não
+    // conversam e por isso não entram em `provedores`. Sai no payload para a tela
+    // poder oferecê-los no ponto de qualificação sem derivar de uma cópia.
+    provedoresDeDecisao: PROVEDORES_DE_DECISAO,
     credenciais: credsRes.data ?? [],
     modelos,
     podeEditar: roleAtLeast(org.role, "admin"),
@@ -208,10 +216,14 @@ const corpoDoPut = z.object({
   // API é pública) gravava `provider: "foobar"`, a rota respondia 200, e todo
   // uso daquele ponto morria em produção com provedor desconhecido. Metade da
   // defesa transferida e nunca instalada.
+  // Aceita os provedores de CONVERSA e os de DECISÃO. O ponto é quem decide qual
+  // prateleira vale: um ponto `natureza: "decisao"` só aceita a segunda. Sem esta
+  // união, o operador configuraria a TypeSafe no ponto de qualificação e o PUT
+  // recusaria com "provedor não suportado".
   provider: z
     .string()
     .min(1)
-    .refine(ehProvedorSuportado, {
+    .refine((id) => ehProvedorSuportado(id) || ehProvedorDeDecisao(id), {
       message:
         "provedor não suportado por esta instalação — escolha um da lista em Agente de IA → Provedores",
     }),

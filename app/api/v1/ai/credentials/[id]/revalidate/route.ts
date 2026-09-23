@@ -13,7 +13,7 @@ import { ok, fail } from "@/lib/api/wrappers";
 import { audit } from "@/lib/audit";
 import { requireRole } from "@/lib/auth/require-role";
 import { byteaToBuffer, decryptKey } from "@/lib/crypto/aes_gcm";
-import { validateProviderKey } from "@/lib/ai/provider-validators";
+import { validarChaveDeProvedor } from "@/lib/ai/provider-validators";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { traduzir } from "@/lib/i18n/dicionario";
 
@@ -73,7 +73,7 @@ export async function POST(
     return fail("decrypt_failed", t("Falha ao decifrar credential."), 500, { requestId });
   }
 
-  const result = await validateProviderKey(row.provider, apiKey);
+  const result = await validarChaveDeProvedor(row.provider, apiKey);
   const patch = result.ok
     ? {
         validated_at: new Date().toISOString(),

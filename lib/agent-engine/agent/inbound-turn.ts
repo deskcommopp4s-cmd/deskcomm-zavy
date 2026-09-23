@@ -105,6 +105,10 @@ import {
   renderStageHint,
   type StageClassifierKnobs,
 } from './stage-classifier';
+import {
+  qualificarLeadComJev,
+  type DepsDaQualificacao,
+} from './qualificacao-do-lead';
 import { loadPlaybook } from './playbook';
 import {
   DECLARACAO_INSTRUCTION,
@@ -1201,6 +1205,13 @@ export interface InboundTurnDeps {
    * anti-ban observável no artefato de trace de forma determinística.
    */
   sleep?: (ms: number) => Promise<void>;
+  /**
+   * Seam da QUALIFICAÇÃO POR DECISÃO (JEV/TypeSafe) — injeção só para teste. Em
+   * produção é `undefined` e o módulo usa os seams reais (banco, fetch, cofre).
+   * A funcionalidade é governada pelos INTERRUPTORES em banco (binding da org +
+   * kill switch global), não por um knob de ambiente.
+   */
+  jev?: DepsDaQualificacao;
 }
 
 /** Checkpoint mais recente do lead — a memória que atravessa sessões. */
@@ -4030,7 +4041,51 @@ async function executarTurnoDoAgente(
     const currentStage: LeadStage = leadState?.stage ?? 'new';
     let stageSuggestion: LeadStage | null = null;
     let stageHintBlock = '';
-    if (deps.knobs.stageClassifier !== undefined) {
+    // ── A QUALIFICAÇÃO POR DECISÃO (JEV/TypeSafe) ────────────────────────────
+    //
+    // Roda ANTES do classificador de etapa. Quando está ligada (binding da org
+    // habilitado + kill switch global ligado) e o provedor de decisão responde, a
+    // etapa JÁ foi movida — o classificador antigo não precisa rodar. Quando está
+    // desligada, ou falha por qualquer motivo (sem credencial, 429/529, timeout,
+    // resposta indefinida), devolve `usado:false` e o classificador atual assume,
+    // idêntico ao comportamento de hoje. NUNCA lança — o try/catch é a rede de
+    // segurança final, não o caminho esperado.
+    //
+    // Só no turno LIVE: no ensaio/sandbox este módulo escreveria no negócio real
+    // do cliente, o que um ensaio não pode fazer.
+    let jevUsado = false;
+    if (!preview) {
+      try {
+        const qualificacao = await qualificarLeadComJev(
+          {
+            pool,
+            admin: deps.crmCfg.supabase,
+            organizationId: tenantId,
+            contactId: leadId || null,
+            jobId: job?.id ?? null,
+            agentId: agentConfig?.agentId ?? null,
+            context: effectiveContext,
+            currentStage,
+            log: runLog,
+          },
+          deps.jev,
+        );
+        jevUsado = qualificacao.usado;
+        if (qualificacao.usado) {
+          // Só nomes/ids/contadores — nunca a conversa. `etapa` é nome de estágio.
+          runLog.info('qualificação por decisão (JEV) aplicada', {
+            movido: qualificacao.movido,
+            motivo: qualificacao.motivo,
+            ...(qualificacao.etapa ? { etapa: qualificacao.etapa } : {}),
+          });
+        }
+      } catch (err) {
+        runLog.warn('qualificação por decisão (JEV) falhou — o turno segue', {
+          error: err instanceof Error ? err.name : 'unknown',
+        });
+      }
+    }
+    if (!jevUsado && deps.knobs.stageClassifier !== undefined) {
       // O rótulo vem ANTES do await: o preparo (playbook, contexto do lead,
       // memória, MCP, opt-out/opt-in e o resto das barreiras) termina aqui.
       medicaoDoTurno?.marcar('etapa');
