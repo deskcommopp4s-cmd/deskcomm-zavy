@@ -831,6 +831,11 @@ const HOSTS_DECLARADOS: Record<string, EntradaDeHost> = {
     motivo:
       "endpoint da API da DeepSeek (OpenAI-compatível) no registry de produção, no runtime de ensaio, no validador de chave e na prova de crédito. É o destino do request, não texto de interface; trocar pelo domínio do revendedor faria a chamada não chegar.",
   },
+  "api.typesafe.ai": {
+    categoria: "FORNECEDOR",
+    motivo:
+      "endpoint do System One da TypeSafe (modelo Jev) — o provedor de DECISÃO que qualifica o lead (lib/ai/decisao/typesafe.ts). É o destino do request de julgamento tipado; trocar pelo domínio do revendedor faria a chamada não chegar.",
+  },
   "generativelanguage.googleapis.com": {
     categoria: "FORNECEDOR",
     motivo:
@@ -884,6 +889,11 @@ const HOSTS_DECLARADOS: Record<string, EntradaDeHost> = {
     categoria: "CONSOLE",
     motivo:
       "painel onde o usuário gera a PRÓPRIA chave da DeepSeek (`ondePegarAChave` em lib/ai/pontos/provedores.ts). Endereço do fornecedor, não nosso.",
+  },
+  "console.typesafe.ai": {
+    categoria: "CONSOLE",
+    motivo:
+      "painel onde o usuário gera a PRÓPRIA chave da TypeSafe (`ondePegarAChave` em lib/ai/pontos/provedores-de-decisao.ts). Endereço do fornecedor, não nosso.",
   },
   "aistudio.google.com": {
     categoria: "CONSOLE",
@@ -1072,6 +1082,11 @@ describe("catraca de host de terceiro no código que embarca", () => {
       "000000000000-xxxxxxxx.apps.googleusercontent.com",
       "aistudio.google.com",
       "console.anthropic.com",
+      // Decisão escrita, como esta lista cobra: `console.typesafe.ai` não é
+      // destino de chamada — é onde o usuário pega a chave da TypeSafe, o
+      // provedor de DECISÃO (Jev) que qualifica o lead. Mesma natureza de
+      // `console.anthropic.com`/`platform.deepseek.com`.
+      "console.typesafe.ai",
       "deskcomm.app",
       "meet.google.com",
       "meusistema.com",

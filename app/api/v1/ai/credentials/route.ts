@@ -16,9 +16,10 @@ import { z } from "zod";
 
 import { ok, fail } from "@/lib/api/wrappers";
 import { requireRole } from "@/lib/auth/require-role";
-import { type Provider } from "@/lib/ai/provider-validators";
+import { type ProvedorDeCredencial } from "@/lib/ai/provider-validators";
 import { guardarCredencial } from "@/lib/ai/credenciais/guardar";
 import { IDS_DE_PROVEDOR } from "@/lib/ai/pontos/provedores";
+import { IDS_DE_PROVEDOR_DE_DECISAO } from "@/lib/ai/pontos/provedores-de-decisao";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { traduzir } from "@/lib/i18n/dicionario";
@@ -33,7 +34,11 @@ const createSchema = z.object({
   // 0127. Enquanto era uma cópia à mão, o banco aceitava OpenRouter e ESTA rota
   // recusava com 422 — o operador via a tela de Provedores oferecer OpenRouter
   // e não tinha onde cadastrar a chave.
-  provider: z.enum(IDS_DE_PROVEDOR),
+  //
+  // A união com os provedores de DECISÃO (`provedores-de-decisao.ts`) é a mesma
+  // lição uma prateleira adiante: sem ela, a TypeSafe apareceria como opção no
+  // ponto `qualificacao_do_lead` e a chave dela não teria onde ser cadastrada.
+  provider: z.union([z.enum(IDS_DE_PROVEDOR), z.enum(IDS_DE_PROVEDOR_DE_DECISAO)]),
   label: z.string().trim().min(1).max(80),
   api_key: z.string().trim().min(8).max(2048),
 });
@@ -82,7 +87,7 @@ export async function POST(req: NextRequest): Promise<Response> {
     });
   }
   const input = parsed.data;
-  const provider = input.provider as Provider;
+  const provider = input.provider as ProvedorDeCredencial;
 
   // O miolo — cifrar, gravar, auditar e validar em segundo plano — mora em
   // `lib/ai/credenciais/guardar.ts` porque o wizard precisa exatamente do mesmo

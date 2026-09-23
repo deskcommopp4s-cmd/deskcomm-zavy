@@ -156,6 +156,18 @@ export interface PontoDeIa {
    * que fala com a API de transcrição.
    */
   fixo?: { razao: string; usa?: { provider: string; modelId: string } };
+  /**
+   * A NATUREZA do ponto. Ausente = `conversa` (o caso de todos os pontos menos
+   * um): o modelo troca texto com o cliente e a escolha mora no registro de
+   * provedores de CONVERSA.
+   *
+   * `decisao` marca o ponto que fala com um provedor de DECISÃO
+   * (`lib/ai/pontos/provedores-de-decisao.ts`) e recebe julgamento tipado — como
+   * o Jev da TypeSafe —, não texto. A distinção é o que impede a tela de oferecer
+   * um modelo de conversa para um ponto que não conversa, e o resolvedor de
+   * anunciar a cadeia de conversa onde ela não se aplica.
+   */
+  natureza?: "conversa" | "decisao";
   registraEm: DestinoDeTelemetria;
 }
 
@@ -257,6 +269,22 @@ export const PONTOS_DE_IA: readonly PontoDeIa[] = [
     emissor: "lib/agent-engine/agent/stage-classifier.ts",
     sintomaDeFalha:
       "Os leads param de andar sozinhos pelo funil e ficam todos na etapa em que entraram.",
+    registraEm: "llm_calls",
+  },
+  {
+    id: "qualificacao_do_lead",
+    rotulo: "Qualificar o lead (decisão)",
+    oQueFaz:
+      "Lê a conversa e devolve um julgamento pronto — em que etapa o funil está, se a pessoa decide a compra, a urgência e o quão pronta para comprar ela está — e move o negócio na hora com base nele.",
+    papel: "entender",
+    // Sem tools e sem imagem: o provedor de decisão não conversa nem usa
+    // ferramentas — ele devolve escolha, probabilidade e confiança, que o código
+    // consome. Exigir tools aqui filtraria a prateleira errada.
+    exige: {},
+    emissor: "lib/agent-engine/agent/qualificacao-do-lead.ts",
+    natureza: "decisao",
+    sintomaDeFalha:
+      "Os leads deixam de ser qualificados e a etapa do funil para de andar sozinha; a conversa continua normalmente pelo classificador anterior.",
     registraEm: "llm_calls",
   },
   {

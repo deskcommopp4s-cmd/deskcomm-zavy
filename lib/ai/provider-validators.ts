@@ -9,6 +9,10 @@
  * Timeout 5s, sem retry. Erros 401 são distintos de erros de rede.
  */
 import { PROVEDORES } from "@/lib/ai/pontos/provedores";
+import {
+  PROVEDOR_DE_DECISAO_POR_ID,
+  type ProvedorDeDecisaoId,
+} from "@/lib/ai/pontos/provedores-de-decisao";
 
 /**
  * Os provedores cuja CHAVE este arquivo sabe validar.
@@ -204,6 +208,31 @@ export async function validateDeepSeekKey(apiKey: string): Promise<ValidationRes
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.name : "network_error" };
   }
+}
+
+/**
+ * Os provedores cuja chave as rotas de credencial sabem cadastrar: os de conversa
+ * mais os de decisão. É a união que a rota de credenciais usa no `z.enum` — sem
+ * ela, o operador não tinha onde colar a chave da TypeSafe.
+ */
+export type ProvedorDeCredencial = Provider | ProvedorDeDecisaoId;
+
+/**
+ * Valida a chave de QUALQUER provedor do cofre — conversa ou decisão.
+ *
+ * Existe para as portas que recebem o `provider` do banco (revalidação, validação
+ * em segundo plano do cadastro) não caírem no `default` de `validateProviderKey`,
+ * que devolveria "provedor desconhecido" para um provedor de decisão já
+ * cadastrado. `validateProviderKey` continua intacta para a prateleira de
+ * conversa; esta é a régua nova.
+ */
+export function validarChaveDeProvedor(
+  provider: string,
+  apiKey: string,
+): Promise<ValidationResult> {
+  const decisao = PROVEDOR_DE_DECISAO_POR_ID.get(provider);
+  if (decisao !== undefined) return decisao.validarChave(apiKey);
+  return validateProviderKey(provider as Provider, apiKey);
 }
 
 export function validateProviderKey(

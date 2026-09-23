@@ -35,6 +35,7 @@
  * de precedência é a parte que erra, e ela precisa ser exercitável por teste
  * unitário. O I/O fica em quem chama.
  */
+import { PROVEDOR_DE_DECISAO_PADRAO } from "./provedores-de-decisao";
 import { PONTO_POR_ID, type PontoDeIa } from "./registro";
 
 /** De onde a escolha efetiva veio — vai para a tela e para o log. */
@@ -168,6 +169,35 @@ export function decidirBinding(entrada: EntradaDaDecisao): DecisaoDeBinding {
     return {
       provider: ponto.fixo.usa.provider,
       modelId: ponto.fixo.usa.modelId,
+      credentialId: null,
+      baseUrl: null,
+      origem: "fixo_do_produto",
+      avisos,
+    };
+  }
+
+  // 0.5 · Ponto de DECISÃO responde por si — NUNCA pela cadeia de conversa.
+  //
+  // Sem este degrau, um ponto de decisão sem binding descia a cadeia e caía no
+  // padrão da organização, e a tela anunciava `claude-sonnet-5` num ponto que
+  // não conversa com modelo algum — a mesma mentira de "Ouvir o áudio do
+  // cliente" (ponto fixo), só que viva. A escolha do provedor de decisão mora no
+  // binding (`ai_purpose_bindings`); sem ele, vale o provedor padrão da
+  // prateleira de decisão.
+  if (ponto?.natureza === "decisao") {
+    if (entrada.binding !== null && entrada.binding.is_enabled) {
+      return {
+        provider: entrada.binding.provider,
+        modelId: entrada.binding.model_id,
+        credentialId: entrada.binding.credential_id,
+        baseUrl: entrada.binding.base_url,
+        origem: "binding",
+        avisos,
+      };
+    }
+    return {
+      provider: PROVEDOR_DE_DECISAO_PADRAO.id,
+      modelId: PROVEDOR_DE_DECISAO_PADRAO.modeloPadrao,
       credentialId: null,
       baseUrl: null,
       origem: "fixo_do_produto",

@@ -26647,3 +26647,17 @@ on conflict (model) do update set
   completion_cents_per_million_tokens = excluded.completion_cents_per_million_tokens,
   notes = excluded.notes,
   superseded_at = null;
+
+-- ---- O kill switch GLOBAL da qualificação do lead (migration 0266) ----
+--
+-- Coluna nova no singleton da INSTALAÇÃO (`platform_settings`, 0253). É o
+-- interruptor do superadmin para a qualificação por provedor de decisão
+-- (Jev/TypeSafe); o interruptor POR ORGANIZAÇÃO é o binding habilitado em
+-- `ai_purpose_bindings` (purpose=qualificacao_do_lead). Default `true` (kill
+-- switch nasce ligado); o que mantém a função desligada no upgrade é a ausência
+-- do binding. Idempotente (`add column if not exists`), sem backfill.
+alter table public.platform_settings
+  add column if not exists qualificacao_jev_ativa boolean not null default true;
+
+comment on column public.platform_settings.qualificacao_jev_ativa is
+  'Kill switch GLOBAL da qualificação do lead com um provedor de decisão (Jev/TypeSafe). O interruptor POR ORGANIZAÇÃO é o binding habilitado em ai_purpose_bindings (purpose=qualificacao_do_lead).';

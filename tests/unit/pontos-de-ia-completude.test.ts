@@ -114,6 +114,14 @@ const FORA_DO_SEAM: Record<string, { arquivo: string; marcador: string }> = {
     arquivo: "lib/ai/runtime/agent.ts",
     marcador: "buildModel",
   },
+  // O ponto de DECISÃO não passa pelo seam `runModelCall`: o provedor devolve
+  // julgamento tipado, não texto. O `purpose` grava a telemetria em `llm_calls`,
+  // mas o emissor não tem uma propriedade `purpose:` para a varredura achar — daí
+  // a prova por marcador, como os demais pontos fora do seam.
+  qualificacao_do_lead: {
+    arquivo: "lib/agent-engine/agent/qualificacao-do-lead.ts",
+    marcador: "classificarComTypeSafe",
+  },
 };
 
 describe("registro de pontos de IA × código", () => {
