@@ -3188,7 +3188,14 @@ async function executarTurnoDoAgente(
                   const ms =
                     esperaDoEnvioMs ??
                     (inicioMs !== null && fimMs !== null ? fimMs - inicioMs : null);
-                  if (ms === null) return;
+                  // `0` aqui NÃO é informação: a cadeia before_send roda mais de
+                  // uma vez por turno (fail-safe) e, da 2ª em diante, a pausa
+                  // daquele ciclo é legitimamente zero — a espera já aconteceu no
+                  // primeiro. Emitir esse zero fez alguém ler "espera humana = 0"
+                  // e concluir que a pausa tinha sido perdida, quando o log irmão
+                  // (`atraso humano antes da 1ª bolha`) mostrava os milissegundos
+                  // reais. Só o intervalo COM duração é medida.
+                  if (ms === null || ms === 0) return;
                   runLog.info('espera humana medida', { espera_humana_ms: ms });
                   // Consumido: a 2ª mensagem do turno não rouba o número da 1ª.
                   esperaDoEnvioMs = null;
