@@ -62,11 +62,33 @@ O que **nunca** fazer:
 |---|---|---|
 | 1 | **Paralelizar as chamadas de IA do turno** | Hoje 5 chamadas em fila (~22s). Ganho ~2× sem mudar lógica |
 | 2 | **Não enviar as ferramentas do CRM nas chamadas internas** | Classificador, anti-jailbreak, detector de promessa e checkpoint não usam ferramenta — as 18 definições são ruído e custo |
-| 3 | **"Digitando…" imediato e aleatório** | Hoje só aparece depois do processamento: o lead espera 20-45s em silêncio e reclama |
+| 3 | ~~"Digitando…" imediato e aleatório~~ | ✅ **JÁ IMPLEMENTADO** — ver a seção abaixo |
 | 4 | **Fundir os avaliadores de "entender" no turno principal** | 5 chamadas → 2 (o anti-jailbreak continua separado — é segurança) |
 | 5 | Validador de credencial respeitar gateway próprio | Hoje tem a URL da OpenRouter fixa no código |
 | 6 | Avisar "alterações não publicadas" na tela do agente | Editar ≠ publicar é a causa de muito tempo perdido |
 | 7 | Janela de envio configurável pela tela | Hoje o `channel_knobs` só se muda por banco |
+
+### ⚠️ Item 3 — NÃO é pendência (medido em 24/09/2026)
+
+O "digitando…" **já estava implementado** quando esta lista foi escrita, e a lista ficou
+mentindo. O que existe:
+
+| Peça | Onde | Estado |
+|---|---|---|
+| Batimento contínuo | `lib/agent-engine/agent/digitando-continuo.ts` | acende em ~400-700ms e re-sinaliza a cada 5s |
+| Acendimento no turno | `inbound-turn.ts:3899` | **depois** das barreiras que descartam (`handoff`, `allowlist`, anti-ban, modo, horário) |
+| Borda do canal | `lib/messaging/presenca.ts` | resolve sessão e destinatário pelas MESMAS funções do envio |
+| Adapter | `lib/channels/adapters/waha.ts:119` | `POST /api/{session}/presence` → **201** |
+
+**Verificado de ponta a ponta:** sinal enviado ao endereço CERTO (`@lid`, não `@c.us`)
+aparece no aparelho do cliente.
+
+**⚠️ A armadilha que custou uma medição errada:** o destinatário do WhatsApp é o
+`wa_lid` quando existe, **não** o telefone — `resolveWahaChatId` testa `waLid` PRIMEIRO.
+Testar presença com `{telefone}@c.us` num contato que tem lid **não acende nada**, e a
+conclusão errada é "o engine não suporta". O endereço certo sai de `resolveWahaChatId`,
+nunca do telefone.
+
 
 ## CI
 
