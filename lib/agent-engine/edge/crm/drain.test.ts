@@ -1,6 +1,8 @@
 import { expect, it, vi } from 'vitest';
 import type pg from 'pg';
 
+import { TIPOS_DERIVAVEIS } from '@/lib/messaging/media/derivable';
+
 import { drainTick } from './drain';
 
 const knobs = { batchSize: 10, intervalMs: 0, idleIntervalMs: 0, debounceMs: 0, reapTimeoutMs: 60000 };
@@ -46,7 +48,7 @@ const eventoDeAudio = (criadoHaMs: number) => ({
 });
 
 function poolFalso(
-  msgRow: { type: string; media_derived_status: string | null },
+  msgRow: { type: string; media_derived_status: string | null; quando?: string },
   calls: string[],
   capacidade: { tem_agente: boolean; tem_roteador: boolean } = { tem_agente: true, tem_roteador: false },
 ) {
@@ -56,7 +58,18 @@ function poolFalso(
     if (sql.includes('ai_dispatch_mode')) return { rows: [{ mode: null }] };
     if (sql.includes('is_group')) return { rows: [{ is_group: false }] };
     if (sql.includes('tem_agente')) return { rows: [capacidade] };
-    if (sql.includes('media_derived_status')) return { rows: [msgRow] };
+    // A consulta real filtra por TIPOS_DERIVAVEIS — linha de texto não entra. O
+    // falso banco precisa recusá-la também, senão devolveria um texto para uma
+    // pergunta que o Postgres nunca responderia, e o teste passaria por engano.
+    //
+    // A idade da mídia acompanha a do evento nos testes: o caso medido é o do
+    // LOTE (foto + texto chegando juntos), onde as duas têm a mesma idade.
+    if (sql.includes('media_derived_status')) {
+      if (!TIPOS_DERIVAVEIS.has(msgRow.type)) return { rows: [] };
+      const quando =
+        msgRow.quando ?? new Date(Date.now() - Number(process.env.__ESPERA__ ?? 0)).toISOString();
+      return { rows: [{ ...msgRow, quando }] };
+    }
     return { rows: [] };
   });
   return { query } as unknown as pg.Pool;
@@ -84,6 +97,37 @@ it('derivação travada além do teto: segue SEM o texto em vez de deixar o clie
   process.env.__ESPERA__ = '150000'; // 150s — muito além do teto de 120s
   await drainTick(poolFalso({ type: 'audio', media_derived_status: null }, calls), knobs, log);
   expect(calls.some((s) => s.includes('job_queue'))).toBe(true);
+});
+
+/**
+ * O caso que a espera antiga perdia: FOTO + TEXTO em mensagens separadas.
+ *
+ * O cliente manda o comprovante e escreve "já paguei, e vocês estão me
+ * cobrando". A evidência e a alegação chegam em DUAS mensagens, e o turno
+ * dispara pela segunda (texto, não derivável). Enquanto a espera olhava só a
+ * mensagem que disparou o evento, o turno seguia sem a visão da foto e o agente
+ * respondia "me conta o que você mandou" sobre um comprovante que o próprio
+ * sistema tinha acabado de ler.
+ *
+ * Medido em VPS, 24/09/2026: foto 13:28:16 · texto 13:28:19 · turno enfileirado
+ * 13:28:28 · derivação concluída 13:28:35.
+ */
+it('foto + pergunta em texto: a espera da mídia olha a CONVERSA, não o id do evento', async () => {
+  const calls: string[] = [];
+  process.env.__ESPERA__ = '1000';
+  // A mídia pendente é a FOTO; o evento veio do TEXTO que chegou depois dela.
+  await drainTick(poolFalso({ type: 'image', media_derived_status: null }, calls), knobs, log);
+
+  const consultaDeMidia = calls.find(
+    (s) => s.includes('media_derived_status') && s.includes('conversation_id'),
+  );
+  expect(consultaDeMidia, 'a espera precisa consultar a conversa').toBeDefined();
+  // O recorte por id de mensagem era o defeito: ele ignora a foto que chegou
+  // antes do texto que disparou o evento.
+  expect(consultaDeMidia).not.toMatch(/and\s+id\s*=\s*\$/);
+  // E o turno é ADIADO — a foto ainda está virando texto.
+  expect(calls.some((s) => s.includes('job_queue'))).toBe(false);
+  expect(calls.some((s) => s.includes("status = 'pending'"))).toBe(true);
 });
 
 /**
