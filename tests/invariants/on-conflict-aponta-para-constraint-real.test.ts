@@ -58,21 +58,66 @@ function arquivosDoRepo(): string[] {
 }
 
 /**
+ * Toda `const NOME = "literal"` do repo, para resolver `.from(NOME)`.
+ *
+ * A varredura exigia a string LITERAL porque "uma tabela que só se conhece em
+ * runtime não tem como ser conferida aqui" — e isso está certo para VARIÁVEL.
+ * Um `const` de módulo não é runtime: o valor está no texto do arquivo, e
+ * recusá-lo não protegia nada. Só deixava o uso fora da conferência — e
+ * `updateDecisionCredential.ts` era reportado como não-resolvido com um alvo
+ * (`provider`) que é PRIMARY KEY de `platform_decision_credentials`, ou seja,
+ * correto. O instrumento acusava o produto por limitação própria.
+ *
+ * Um nome que aparece com DOIS valores diferentes no repo NÃO é resolvido: a
+ * varredura prefere não saber a saber errado.
+ */
+function constantesDeTexto(arquivos: string[]): Map<string, string | null> {
+  const valores = new Map<string, string | null>();
+  for (const arquivo of arquivos) {
+    const texto = readFileSync(join(RAIZ, arquivo), "utf8");
+    for (const m of texto.matchAll(
+      /(?:export\s+)?const\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*"([^"]*)"\s*;/g,
+    )) {
+      const nome = m[1] as string;
+      const valor = m[2] as string;
+      const jaVisto = valores.get(nome);
+      if (jaVisto === undefined) valores.set(nome, valor);
+      else if (jaVisto !== valor) valores.set(nome, null);
+    }
+  }
+  return valores;
+}
+
+/**
+ * `.from(<tabela>)`, com a tabela LITERAL ou por `const` — e NUNCA
+ * `.storage.from(...)`, que é bucket do Storage e não tem constraint única:
+ * confundir os dois faria a conferência reprovar um bucket por "não ter índice
+ * único", que é o falso positivo simétrico ao que este arquivo existe para
+ * evitar.
+ */
+const RE_FROM =
+  /(?<!storage)\s*\.from\(\s*(?:"([a-z0-9_]+)"|([A-Za-z_][A-Za-z0-9_]*))(?:\s+as\s+\w+)?\s*\)/g;
+
+/**
  * Acha o `.from("<tabela>")` mais próximo ACIMA do `onConflict`.
  *
  * Heurística, e ela precisa ser honesta sobre o que não alcança: quando não há
- * `.from()` antes na mesma janela, o uso é REPORTADO como não-resolvido em vez
- * de silenciosamente ignorado — varredura que pula o que não entende devolve
- * "nenhum problema" com a mesma cara de "está tudo certo".
+ * `.from()` antes na mesma janela — ou quando ele nomeia uma tabela que não dá
+ * para resolver — o uso é REPORTADO como não-resolvido em vez de silenciosamente
+ * ignorado — varredura que pula o que não entende devolve "nenhum problema" com
+ * a mesma cara de "está tudo certo".
  *
  * O `as <tipo>` é opcional no padrão porque o repo escreve `.from("x" as never)`
  * para tabela que ainda não está em `lib/database.types.ts` — sem ele, o
  * `push_subscriptions` do Web Push era reportado como não-resolvido, e o alvo
  * dele (`endpoint`, que É único) nunca chegava a ser conferido contra o banco.
- * A string continua tendo de ser LITERAL: `.from(variavel)` segue não-resolvido,
- * porque uma tabela que só se conhece em runtime não tem como ser conferida aqui.
+ * A tabela pode vir LITERAL ou por `const` de módulo (ver `constantesDeTexto`);
+ * o que segue fora do alcance é a VARIÁVEL, cujo valor só existe em runtime.
  */
-function usosDe(arquivo: string): { usos: Uso[]; naoResolvidos: string[] } {
+function usosDe(
+  arquivo: string,
+  constantes: Map<string, string | null>,
+): { usos: Uso[]; naoResolvidos: string[] } {
   const texto = readFileSync(join(RAIZ, arquivo), "utf8");
   const usos: Uso[] = [];
   const naoResolvidos: string[] = [];
@@ -81,16 +126,19 @@ function usosDe(arquivo: string): { usos: Uso[]; naoResolvidos: string[] } {
   let m: RegExpExecArray | null;
   while ((m = re.exec(texto)) !== null) {
     const antes = texto.slice(0, m.index);
-    const from = [...antes.matchAll(/\.from\(\s*"([a-z0-9_]+)"(?:\s+as\s+\w+)?\s*\)/g)].pop();
+    const from = [...antes.matchAll(RE_FROM)].pop();
     const colunas = (m[1] ?? "")
       .split(",")
       .map((c) => c.trim())
       .filter((c) => c.length > 0);
-    if (!from) {
+    // Literal vence direto; `const` de módulo é resolvido pelo mapa — e nome
+    // que colide no repo (dois valores) devolve `null` e cai no não-resolvido.
+    const tabela = from?.[1] ?? (from?.[2] ? constantes.get(from[2]) : null) ?? null;
+    if (!tabela) {
       naoResolvidos.push(`${arquivo}: onConflict "${m[1]}" sem .from() antes`);
       continue;
     }
-    usos.push({ arquivo, tabela: from[1] as string, colunas });
+    usos.push({ arquivo, tabela, colunas });
   }
   return { usos, naoResolvidos };
 }
@@ -117,7 +165,8 @@ function conjuntosUnicos(tabela: string): string[][] {
 
 describe("onConflict × constraints reais", () => {
   const arquivos = arquivosDoRepo();
-  const todos = arquivos.map(usosDe);
+  const constantes = constantesDeTexto(arquivos);
+  const todos = arquivos.map((a) => usosDe(a, constantes));
   const usos = todos.flatMap((t) => t.usos);
   const naoResolvidos = todos.flatMap((t) => t.naoResolvidos);
 
