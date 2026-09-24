@@ -70,6 +70,24 @@ const PEDE_PARA_SAIR = [
   "me tire do cadastro",
   "remova meu numero do sistema",
   "retire meu contato do cadastro",
+  // ─── IMPERATIVO NEGATIVO — a família inteira que faltava (24/09/2026) ─────
+  //
+  // O padrão `não me X mais` tinha lista PRÓPRIA e estreita, copiada à mão, em
+  // vez de usar a constante compartilhada. E a locução `entrar em contato` não
+  // existia em lista nenhuma — `entre` é de ENTRAR, não de comunicar.
+  //
+  // Medido com a função real, antes deste conserto: 8 destas 11 passavam.
+  "não entre mais em contato neste numero",
+  "nao entre em contato comigo",
+  "nao me contate mais",
+  "nao me contacte mais",
+  "nao me procure mais",
+  "nao me incomode mais",
+  "nao me escreva mais",
+  "nao me fale mais",
+  "nao me perturbe mais",
+  "nao me importune mais",
+  "nao volte a entrar em contato",
 ];
 
 /** Frases do dia a dia que usam a palavra e NÃO são pedido de descadastro. */
@@ -121,6 +139,20 @@ const NAO_PEDE_PARA_SAIR = [
   "retirei o pedido ontem",
   "vou remover o app",
   "tira da lista de espera",
+  // ─── Os invasores do imperativo negativo ──────────────────────────────────
+  //
+  // A regra passou a usar a lista COMPLETA de verbos de comunicação. Mais
+  // verbos = mais superfície. Estas provam que o freio segurou:
+  "nao me mande mais boletos",
+  "nao me mande mais faturas por email",
+  "nao me envie mais os produtos errados",
+  "nao me mandem mais cobrancas duplicadas",
+  // A locução `entrar em contato` também é afirmativa na vida real: quem MARCA
+  // um contato não está pedindo para sair dele.
+  "nao vou poder entrar em contato hoje",
+  "vou entrar em contato amanha",
+  "quando voces vao entrar em contato?",
+  "nao consegui entrar em contato ontem",
   // vazios
   "",
   "   ",
