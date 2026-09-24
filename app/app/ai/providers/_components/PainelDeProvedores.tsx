@@ -434,6 +434,14 @@ function CartaoDoPonto({
   const [credentialId, setCredentialId] = useState(ponto.efetivo.credentialId ?? "");
   const [baseUrl, setBaseUrl] = useState(ponto.efetivo.baseUrl ?? "");
   const [salvando, setSalvando] = useState(false);
+  // Resultado do teste — `null` = ainda não testou. Guardar o ÚLTIMO resultado
+  // (e não um booleano "ok") é o que permite mostrar o MOTIVO da falha: trocar
+  // de provedor ou de endereço invalida o veredito anterior, e um "OK" verde de
+  // dois cliques atrás sobre uma configuração que já mudou é pior que nada.
+  const [testando, setTestando] = useState(false);
+  const [teste, setTeste] = useState<
+    { ok: true } | { ok: false; codigo: string; mensagem: string } | null
+  >(null);
 
   const modelosDoProvider = dados.modelos.filter((m) => m.provider === provider);
   const credsDoProvider = dados.credenciais.filter((c) => c.provider === provider);
@@ -478,6 +486,53 @@ function CartaoDoPonto({
       await aoSalvar();
     } finally {
       setSalvando(false);
+    }
+  }
+
+  /**
+   * PROVA DE VERDADE: uma geração mínima contra o par chave + endereço.
+   *
+   * Diferente do "Validada" da tela de Credenciais, que bate no `GET /v1/models`
+   * do provedor e por isso prova só que a chave existe — este teste atravessa a
+   * COBRANÇA, que é o que prova que a configuração responde. É o único jeito de
+   * descobrir que o gateway próprio está errado ANTES de o cliente descobrir.
+   *
+   * Custa um token. Por isso é um clique explícito, e não algo que roda sozinho
+   * ao abrir a tela.
+   */
+  async function testar() {
+    setTestando(true);
+    setTeste(null);
+    try {
+      const res = await fetch("/api/v1/ai/providers/test", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          provider,
+          model_id: modelId,
+          credential_id: credentialId || null,
+          base_url: baseUrl.trim() !== "" ? baseUrl.trim() : null,
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        setTeste({
+          ok: false,
+          codigo: json?.error?.code ?? "erro",
+          mensagem: json?.error?.message ?? t("não consegui testar"),
+        });
+        return;
+      }
+      const r = json?.data as
+        | { ok: true }
+        | { ok: false; codigo: string; mensagem: string };
+      setTeste(r.ok ? { ok: true } : { ok: false, codigo: r.codigo, mensagem: r.mensagem });
+    } catch {
+      // Rede da PRÓPRIA tela caiu — não é veredito sobre a configuração, e
+      // dizer "falhou" aqui mandaria o operador trocar uma chave que está certa.
+      setTeste({ ok: false, codigo: "rede", mensagem: t("não consegui alcançar o servidor") });
+    } finally {
+      setTestando(false);
     }
   }
 
@@ -625,7 +680,13 @@ function CartaoDoPonto({
               <Label className="text-xs">{t("Endereço próprio (opcional)")}</Label>
               <Input
                 value={baseUrl}
-                onChange={(e) => setBaseUrl(e.target.value)}
+                // Mudar o endereço invalida o veredito: o "Respondeu" verde é
+                // sobre a configuração TESTADA, e deixá-lo de pé sobre outra
+                // seria afirmar o que ninguém verificou.
+                onChange={(e) => {
+                  setBaseUrl(e.target.value);
+                  setTeste(null);
+                }}
                 placeholder="https://mi-gateway.ejemplo.com/v1"
                 data-testid={`base-url-${ponto.id}`}
               />
@@ -637,7 +698,7 @@ function CartaoDoPonto({
             </div>
           )}
 
-          <div className="sm:col-span-3">
+          <div className="flex flex-wrap items-center gap-2 sm:col-span-3">
             <Button
               size="sm"
               disabled={salvando || !modelId}
@@ -646,7 +707,47 @@ function CartaoDoPonto({
             >
               {salvando ? t("Salvando…") : t("Salvar")}
             </Button>
+            {/* O TESTE. Ele responde a pergunta que o "Validada" da tela de
+                Credenciais NÃO responde: se o par chave + endereço responde de
+                verdade. É o que impede o operador de descobrir que o gateway
+                próprio está errado só quando o cliente reclamar. */}
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={testando || salvando || !modelId || !credentialId}
+              onClick={() => void testar()}
+              data-testid={`testar-${ponto.id}`}
+            >
+              {testando ? t("Testando…") : t("Testar")}
+            </Button>
+            {!credentialId && (
+              <span className="text-xs text-muted-foreground">
+                {t("Escolha a credencial da empresa para poder testar.")}
+              </span>
+            )}
           </div>
+
+          {teste && (
+            <p
+              role="status"
+              data-testid={`resultado-teste-${ponto.id}`}
+              className={
+                teste.ok
+                  ? "rounded-md border border-emerald-600/40 bg-emerald-500/10 p-2 text-xs sm:col-span-3"
+                  : "rounded-md border border-amber-500/40 bg-amber-500/10 p-2 text-xs sm:col-span-3"
+              }
+            >
+              {teste.ok ? (
+                t("Respondeu. A chave e o endereço funcionam para este modelo.")
+              ) : (
+                <>
+                  <span className="font-medium">{t("Não respondeu:")}</span>{" "}
+                  {t(teste.mensagem)}{" "}
+                  <span className="font-mono text-muted-foreground">({teste.codigo})</span>
+                </>
+              )}
+            </p>
+          )}
         </div>
       )}
     </Card>
