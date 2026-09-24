@@ -531,9 +531,16 @@ export function AgentForm(props: Props) {
     const pubN = props.published?.version_number;
     const draftN = props.draft?.version_number;
     if (pubN && draftN) {
+      // ⚠️ VARIANT `warning`, não `secondary` — e a diferença é o ponto inteiro.
+      //
+      // Este é o estado em que o autor ACHA que o que ele escreveu está no ar, e
+      // não está: o runtime responde com a publicada, e o rascunho só vale depois
+      // de publicar. Com o badge cinza (`secondary`), a tela dizia "Publicado v3 +
+      // Rascunho v4" no MESMO tom com que diz "Publicado v3" — informação certa,
+      // sinal nenhum. Quem estava com pressa lia "publicado" e ia embora.
       return (
-        <Badge variant="secondary">
-          {t("Publicado")} v{pubN} + {t("Rascunho")} v{draftN}
+        <Badge variant="warning">
+          {t("No ar")} v{pubN} · {t("suas edições (v")}{draftN}{t(") ainda não")}
         </Badge>
       );
     }
@@ -616,6 +623,41 @@ export function AgentForm(props: Props) {
           ) : null}
         </div>
       </div>
+
+      {/* ─── "SUAS EDIÇÕES NÃO ESTÃO NO AR" — o aviso que faltava ────────────
+          Editar e publicar são dois atos, e o intervalo entre eles é onde nasce
+          o "editei e não funcionou": o runtime responde com a versão PUBLICADA
+          e ignora o rascunho, então o autor testa, não vê efeito, e vai procurar
+          defeito no que ele acabou de escrever.
+
+          O badge do cabeçalho já diz o estado, mas badge é RÓTULO. Este é
+          ALERTA: bloco inteiro, cor de aviso, e a frase nomeia as DUAS versões —
+          a que está no ar e a que não está. `role="alert"` para o leitor de tela
+          anunciar; `aria-live="polite"` porque ele aparece depois de um save, não
+          na abertura da tela.
+
+          Só aparece quando há rascunho MAIS NOVO que a publicada — que é
+          exatamente o `props.draft` desta tela. Publicado sem rascunho não
+          acende, e agente novo (que nunca esteve no ar) também não: ali o
+          "Publicar" é o passo seguinte, não um aviso. */}
+      {isEdit && props.published && props.draft ? (
+        <div
+          role="alert"
+          aria-live="polite"
+          className="rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-sm"
+          data-testid="aviso-nao-publicado"
+        >
+          <span className="font-medium">{t("O que está no ar é a v")}</span>
+          {props.published.version_number}
+          <span className="font-medium">
+            {t(" — suas edições no rascunho v")}
+            {props.draft.version_number}
+            {t(" ainda não valem")}
+          </span>
+          {". "}
+          {t("O agente continua respondendo com a versão publicada até você clicar em Publicar.")}
+        </div>
+      ) : null}
 
       {/*
         NAVEGAÇÃO POR PAPEL (spec 16 §6). Um form só, um save só — os papéis são
