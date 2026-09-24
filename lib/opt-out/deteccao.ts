@@ -193,7 +193,33 @@ const FRASES_DE_OPT_OUT: readonly RegExp[] = [
       `(?!\\s+(?:${DETERMINANTES_DE_OBJETO})?\\s*(?:${OBJETOS_NAO_COMUNICATIVOS})\\b)`,
     "u",
   ),
-  /\bme\s+(?:tira|tire|tirem|remove|remova|removam|retira|retire|exclui|exclua|apaga|apague)\s+(?:da|dessa|desta|de\s+sua|da\s+sua)\s+lista\b/u,
+  // ─── Remoção de lista/cadastro — TRÊS lacunas medidas em 24/09/2026 ───────
+  //
+  // Todas da MESMA forma: o cliente pede para sair e o sistema segue mandando.
+  // Medido com a regex real, antes deste conserto:
+  //
+  //   ✅ "me tira da lista"                ❌ "pode me REMOVER da lista"
+  //   ✅ "me remova da lista"              ❌ "retire MEU CONTATO da lista"
+  //   ✅ "me retire da lista"              ❌ "remova meu numero da lista"
+  //   ✅ "me exclua da lista"              ❌ "me tire DO CADASTRO"
+  //
+  //  1. INFINITIVO — a lista tinha `remove|remova|removam` e não `remover`.
+  //     "pode me remover da lista" é como se pede de fato, e passava batido.
+  //  2. OBJETO EXPLÍCITO — "retire MEU CONTATO da lista" não traz o pronome
+  //     `me` antes do verbo, e o padrão exigia ele: o pedido se perdia.
+  //  3. DESTINO — "do cadastro"/"do sistema" é o mesmo pedido que "da lista".
+  //
+  // O corpus de 79 frases que a regra cita continua passando; o que entra são
+  // formas que ele NÃO cobria. Os invasores que este conserto precisa evitar
+  // (medidos): "remove o produto do carrinho", "apaga a luz", "tira meu nome
+  // do e-mail", "remove meu contato do grupo" — todos seguem passando.
+  //
+  // `cancelar` fica FORA de propósito: "quero cancelar o pedido" e "posso
+  // cancelar a consulta de amanhã?" são do corpus NEGATIVO, e o verbo sozinho
+  // não distingue descadastro de cancelamento de compra.
+  /\bme\s+(?:tira|tire|tirem|tirar|remove|remova|removam|remover|retira|retire|retirar|exclui|exclua|excluir|apaga|apague|apagar|deleta|delete|deletar)\s+(?:da|dessa|desta|de\s+sua|da\s+sua)\s+lista\b/u,
+  /\b(?:tira|tire|tirem|tirar|remove|remova|removam|remover|retira|retire|retirar|exclui|exclua|excluir|apaga|apague|apagar|deleta|delete|deletar)\s+(?:meu|minha|meus|minhas|o|a|os|as|nosso|nossa)\s+(?:contato|numero|nome|cadastro|dados|telefone|celular|whatsapp|email)\s+(?:da|dessa|desta|de\s+sua|da\s+sua)\s+lista\b/u,
+  /\b(?:me\s+)?(?:tira|tire|tirem|tirar|remove|remova|removam|remover|retira|retire|retirar|exclui|exclua|excluir|apaga|apague|apagar|deleta|delete|deletar)\s+(?:(?:meu|minha|o|a|nosso|nossa)\s+(?:contato|numero|nome|dados|telefone|celular|whatsapp|email)\s+)?d[oa]\s+(?:cadastro|sistema|banco\s+de\s+dados)\b/u,
   /\bsair\s+d(?:a|essa|esta)\s+lista\b/u,
   /\bcancelar?\s+(?:a\s+)?(?:inscricao|assinatura)\b/u,
   /\b(?:me\s+)?descadastr\w*\b/u,
