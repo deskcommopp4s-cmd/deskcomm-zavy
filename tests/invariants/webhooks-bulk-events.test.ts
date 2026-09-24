@@ -56,11 +56,49 @@ function sqlString(v: string): string {
   return `'${v.replace(/'/g, "''")}'`;
 }
 
-function sqlLiteral(v: unknown): string {
+/**
+ * Tipo REAL de cada coluna, lido do banco (cacheado por tabela).
+ *
+ * O `sqlLiteral` adivinhava o tipo pelo FORMATO do valor JS — e um array JS
+ * virava `text[]`. Só que `automation_rule_runs.actions_result` é **jsonb**, e o
+ * PostgREST verdadeiro manda JSON (o Postgres casta para o tipo da coluna).
+ * O desfecho era duplo: `String(x)` sobre um objeto produzia a string literal
+ * `"[object Object]"` (o dado sumiria) e o `::text[]` era recusado pela coluna
+ * jsonb — o insert falhava, a run não era auditada, e o invariante que mede
+ * justamente essa auditoria quebrava por causa do dublê, não do produto.
+ *
+ * Perguntar ao banco em vez de adivinhar cobre também o array VAZIO, que não
+ * tem elemento de onde inferir nada.
+ */
+const tiposPorTabela = new Map<string, Record<string, string>>();
+
+function tiposDaTabela(tabela: string): Record<string, string> {
+  const cache = tiposPorTabela.get(tabela);
+  if (cache) return cache;
+  const out = sql(
+    `select column_name || '|' || data_type from information_schema.columns where table_schema = 'public' and table_name = '${tabela}';`,
+  );
+  const mapa: Record<string, string> = {};
+  for (const linha of out.split("\n")) {
+    const [col, tipo] = linha.trim().split("|");
+    if (col && tipo) mapa[col] = tipo;
+  }
+  tiposPorTabela.set(tabela, mapa);
+  return mapa;
+}
+
+function sqlLiteral(v: unknown, tipoDaColuna?: string): string {
   if (v === null || v === undefined) return "null";
   if (typeof v === "number") return String(v);
   if (typeof v === "boolean") return v ? "true" : "false";
-  if (Array.isArray(v)) return `ARRAY[${v.map((x) => sqlString(String(x))).join(",")}]::text[]`;
+  if (Array.isArray(v)) {
+    // O tipo quem diz é o BANCO. Sem ele, o palpite antigo (`text[]`) segue
+    // valendo para as colunas que realmente são array de texto.
+    if (tipoDaColuna === "jsonb" || tipoDaColuna === "json") {
+      return `${sqlString(JSON.stringify(v))}::jsonb`;
+    }
+    return `ARRAY[${v.map((x) => sqlString(String(x))).join(",")}]::text[]`;
+  }
   if (typeof v === "object") return `${sqlString(JSON.stringify(v))}::jsonb`;
   return sqlString(String(v));
 }
@@ -95,7 +133,7 @@ class FakeQB implements PromiseLike<QResult> {
     return this;
   }
   eq(col: string, val: unknown): this {
-    this.filters.push(`${col} = ${sqlLiteral(val)}`);
+    this.filters.push(`${col} = ${sqlLiteral(val, tiposDaTabela(this.table)[col])}`);
     return this;
   }
   in(col: string, vals: unknown[]): this {
@@ -127,11 +165,13 @@ class FakeQB implements PromiseLike<QResult> {
     }
     if (this.mode === "insert") {
       const cols = Object.keys(this.mutationData!);
-      const vals = cols.map((c) => sqlLiteral(this.mutationData![c]));
+      const tipos = tiposDaTabela(this.table);
+      const vals = cols.map((c) => sqlLiteral(this.mutationData![c], tipos[c]));
       return `insert into public.${this.table} (${cols.join(", ")}) values (${vals.join(", ")})`;
     }
+    const tipos = tiposDaTabela(this.table);
     const setClauses = Object.entries(this.mutationData!)
-      .map(([k, v]) => `${k} = ${sqlLiteral(v)}`)
+      .map(([k, v]) => `${k} = ${sqlLiteral(v, tipos[k])}`)
       .join(", ");
     return `update public.${this.table} set ${setClauses}${this.where()}`;
   }
