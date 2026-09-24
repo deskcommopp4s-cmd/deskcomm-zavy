@@ -15,11 +15,13 @@ export interface ModelCapabilities {
 const NATIVE: ModelCapabilities = { image: true, pdf: true };
 const NONE: ModelCapabilities = { image: false, pdf: false };
 
-// Famílias flagship dos 3 providers aceitam imagem+pdf via content parts da AI SDK.
+// Famílias flagship dos providers aceitam imagem+pdf via content parts da AI SDK.
+// DeepSeek Flash (V4.1) suporta visão — ver https://api-docs.deepseek.com/quick_start/pricing/
 const PROVIDER_DEFAULT: Record<string, ModelCapabilities> = {
   anthropic: NATIVE,
   openai: NATIVE,
   google: NATIVE,
+  deepseek: NATIVE,
 };
 
 /**
