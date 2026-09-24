@@ -188,8 +188,24 @@ export function createDefaultRegistry(opts?: {
   return {
     anthropic: (apiKey, modelId) =>
       createAnthropic({ apiKey, fetch: contain(ANTHROPIC_ENDPOINT) })(modelId),
-    openai: (apiKey, modelId) =>
-      createOpenAI({ apiKey, fetch: contain(OPENAI_ENDPOINT) })(modelId),
+    /**
+     * O `baseUrl` do painel é honrado aqui pela MESMA razão da OpenRouter e da
+     * DeepSeek abaixo — e a ausência dele era um defeito, não uma decisão: a
+     * tela oferece endereço próprio para os três (`aceitaEndpointProprio` em
+     * `lib/ai/pontos/provedores.ts`), o operador cola a URL do gateway, o
+     * painel SALVA, e a chamada ia ao endpoint canônico da OpenAI de qualquer
+     * forma. A chave do gateway chegava à OpenAI, ou o gateway não era usado e
+     * o operador acreditava estar roteando por onde não estava.
+     *
+     * Corrigido: a factory passou a ter o terceiro parâmetro, como as outras
+     * duas que o catálogo declara equivalentes. É também POR AQUI que o roteiro
+     * de "modelo local" (gateway OpenAI-compatível no host do cliente) vira
+     * configuração de tela em vez de código.
+     */
+    openai: (apiKey, modelId, baseUrl) => {
+      const endpoint = baseUrl ?? OPENAI_ENDPOINT;
+      return createOpenAI({ apiKey, baseURL: endpoint, fetch: contain(endpoint) })(modelId);
+    },
     google: (apiKey, modelId) =>
       createGoogleGenerativeAI({ apiKey, fetch: contain(GOOGLE_ENDPOINT) })(modelId),
     /**
