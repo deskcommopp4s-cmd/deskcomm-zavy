@@ -107,48 +107,63 @@ export function ehSessaoAusente(error: { name?: string } | null | undefined): bo
 
 export const loadAuthUser = cache(async (): Promise<AuthUser | null> => {
   const supabase = await createClient();
-  const {
-    data: { user },
-    error,
-  } = await supabase.auth.getUser();
-  // ⚠️ O `error` era DESCARTADO — nem chegava a ser desestruturado —, e aqui
-  // `user: null` é tão ambíguo quanto o `data: null` que a query logo abaixo
-  // trata com todo o cuidado: significa "não está logado" (estado normal) E
-  // "não deu para perguntar" (rede, GoTrue fora do ar, token ilegível).
+
+  // ─── getClaims, e não getUser: a verificação do JWT é LOCAL ────────────────
   //
-  // A ação não muda, e isso é deliberado: sem usuário confirmado, devolver
-  // `null` — e portanto redirecionar para o login — é o desfecho seguro.
-  // Falhar FECHADO na ação continua certo. O que estava errado era falhar
-  // fechado também na INFORMAÇÃO: quem investigasse depois via só uma pessoa
-  // "deslogada", sem nada distinguindo isso de uma falha transitória.
+  // `getUser()` pergunta ao servidor de Auth a CADA chamada, e isso custa uma
+  // ida de rede por requisição de API. Medido nesta instalação (5 amostras, de
+  // dentro do container): **34 · 42 · 60 · 336 · 1340 ms**. Como uma tela faz de
+  // 4 a 8 chamadas, a conta fecha nos segundos de "carregando" que o operador vê
+  // a cada navegação — e a cauda longa (1340 ms) é o pior pedaço, porque aparece
+  // sem aviso.
   //
-  // Custou caro uma vez: um vermelho de e2e em que a barra lateral "perdeu o
-  // logo" foi, por eliminação, uma casca de app que não era a casca do app —
-  // e a hipótese nº 1 é justamente um redirect nascido aqui. Com este log, a
-  // próxima ocorrência se explica sozinha em vez de custar uma investigação.
+  // `getClaims()` verifica a ASSINATURA do JWT localmente, pela WebCrypto, sem
+  // rede: **0 ms** medidos. Ele só consegue isso porque o projeto assina com
+  // chave ASSIMÉTRICA (ES256 — confirmado em `/.well-known/jwks.json`); com
+  // chave simétrica o próprio SDK volta a fazer a chamada de rede e este
+  // conserto não ganharia nada. O JWKS é buscado uma vez e fica em cache: 555 ms
+  // na primeira vez, 54-85 ms depois.
   //
-  // ⚠️ MAS NEM TODO `error` AQUI É INCIDENTE — e é por isso que `ehSessaoAusente`
-  // existe. Ver o comentário dela: sem esse filtro, este log dispara em todo
-  // visitante deslogado e refaz, do lado do log, a mesma fusão que este bloco
-  // existe para desfazer.
+  // ⚠️ O QUE SE PERDE, e é decisão consciente: `getUser()` pergunta ao servidor
+  // se a SESSÃO continua viva; `getClaims()` não — ele confia na assinatura até
+  // o `exp` do token (≈1 h). Um "sair de todos os dispositivos" passa a valer na
+  // expiração, não no clique.
+  //
+  // O que NÃO muda:
+  //   • token FORJADO continua recusado — a assinatura é verificada;
+  //   • token EXPIRADO continua recusado — o `exp` é checado;
+  //   • revogação de VÍNCULO com organização continua valendo na hora, porque
+  //     ela é filtrada por `revoked_at` na query logo abaixo, não pelo token.
+  const { data: claimsData, error } = await supabase.auth.getClaims();
+  const claims = claimsData?.claims;
+  // ⚠️ Mesmo cuidado do `getUser()` de antes: o `error` era descartado, e aqui
+  // `claims` ausente é tão ambíguo quanto o `data: null` da query abaixo —
+  // significa "não está logado" (normal) E "não deu para verificar". A ação é a
+  // mesma (devolver `null` → login), que é o desfecho seguro; o log é o que
+  // separa os dois para quem for investigar.
   if (error && !ehSessaoAusente(error)) {
-    // As chaves são as MESMAS do outro `logger.error` desta função (linha ~134):
-    // `code` e `message`. Dois nomes para o mesmo conceito, dentro da mesma
-    // função, obrigariam quem consulta o agregador a escrever duas buscas — num
-    // conserto cujo objeto é diagnóstico.
-    //
-    // `name` viaja junto porque é o que separa as CLASSES: `AuthRetryableFetchError`
-    // (rede, GoTrue fora do ar) de `AuthApiError` (token ilegível). Ambas podem
-    // chegar com o mesmo `status`, e a mensagem vem em inglês do upstream — sem o
-    // nome, distinguir as duas viraria regex sobre texto que muda entre versões.
-    logger.error("[auth] getUser falhou — tratando como não autenticado", {
+    // As chaves são as MESMAS do outro `logger.error` desta função: `code` e
+    // `message`. `name` viaja junto porque é o que separa as CLASSES —
+    // `AuthRetryableFetchError` (rede/JWKS fora) de `AuthApiError` (token
+    // ilegível) —, e a mensagem vem em inglês do upstream.
+    logger.error("[auth] getClaims falhou — tratando como não autenticado", {
       name: error.name,
-      code: error.code ?? null,
-      status: error.status ?? null,
+      code: (error as { code?: string }).code ?? null,
+      status: (error as { status?: number }).status ?? null,
       message: error.message,
     });
   }
-  if (!user) return null;
+  if (!claims?.sub) return null;
+
+  // O corpo abaixo consome `user.id`, `user.email` e `user.user_metadata`. Os
+  // claims trazem os três; montamos o objeto AQUI para que nada depois precise
+  // saber de onde ele veio — trocar a origem de novo não deve mexer no resto.
+  const user = {
+    id: claims.sub,
+    email: typeof claims.email === "string" ? claims.email : "",
+    user_metadata: (claims.user_metadata ?? {}) as Record<string, unknown>,
+  };
+
 
   // Platform admin e Org memberships consultados em paralelo no Supabase:
   // elimina round-trip sequencial a cada requisição.
