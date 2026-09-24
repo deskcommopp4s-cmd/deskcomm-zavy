@@ -3,6 +3,16 @@
 Este repositório é o **fork privado** do [DeskcommCRM](https://github.com/melgarafael/DeskcommCRM)
 mantido pela **Opp4System**, que dá base ao produto **zavy CRM**.
 
+## Estado atual (24/09/2026)
+
+| | |
+|---|---|
+| **Último commit** | `aaabb02f` |
+| **Produção** | https://deskcomm.opp4s.com |
+| **Health** | https://deskcomm.opp4s.com/api/v1/health |
+| **Imagens** | `ghcr.io/deskcommopp4s-cmd/deskcommcrm:latest` · `deskcomm-worker:latest` · `deskcomm-scheduler:latest` |
+| **Containers** | `deskcomm-app-1` · `-worker-1` · `-scheduler-1` · `-waha-1` · `-redis-1` · `-srh-1` |
+
 ## Por que existe
 
 O DeskcommCRM é MIT e roda a nossa operação. Mantemos este fork para:
@@ -34,6 +44,18 @@ O que **nunca** fazer:
 - Renomear ou reescrever funções/arquivos do upstream sem necessidade
 - Nomear provider fora de `lib/channels/` (o `lint:channels` reprova)
 
+## Correções ENTREGUES
+
+| # | Correção | Onde | PR |
+|---|---|---|---|
+| 1 | **Mídia + texto no MESMO turno** — a espera da derivação olhava só a mensagem que disparou o evento; com FOTO seguida de TEXTO, o turno disparava pelo texto e respondia sem a visão da foto | `lib/agent-engine/edge/crm/drain.ts` | [#1594](https://github.com/melgarafael/DeskcommCRM/pull/1594) |
+| 2 | **Visão do DeepSeek** — o registry de capacidades não tinha `deepseek`, então o media-derive tratava o modelo como sem visão e abria aviso na Central | `lib/agent-engine/edge/llm/capabilities.ts` | — |
+| 3 | **Qualificação do lead por decisão (JEV/TypeSafe)** — provedor de decisão de primeira classe, com chave de plataforma | `lib/ai/decisao/` · `lib/agent-engine/agent/qualificacao-do-lead.ts` | — |
+| 4 | **Níveis da qualificação + regressão de funil** — três níveis com JEV | `lib/agent-engine/agent/qualificacao-do-lead.ts` | — |
+| 5 | **DeepSeek como provedor de primeira classe** — raciocínio desligável por knob | `lib/agent-engine/edge/llm/providers.ts` | [#1275](https://github.com/melgarafael/DeskcommCRM/pull/1275) |
+| 6 | Vírgula nas opções de `select`/`multiselect` | — | [#1069](https://github.com/melgarafael/DeskcommCRM/pull/1069) |
+| 7 | Chave de IA editável + DELETE que ensina a repontar | — | [#1112](https://github.com/melgarafael/DeskcommCRM/pull/1112) |
+
 ## Correções planejadas (ordem de risco)
 
 | # | Correção | Motivo |
@@ -53,3 +75,46 @@ no GHCR: `deskcommcrm`, `deskcomm-worker`, `deskcomm-scheduler`.
 
 **A VPS nunca constrói** — ela só faz `docker pull` da imagem pronta. Construir na VPS já
 derrubou a produção uma vez (load 20,5 em 8 núcleos).
+
+## Operação — o que dói saber
+
+### O container roda a IMAGEM, não o código-fonte
+
+Editar um `.ts` em `/opt/apps/deskcomm` **não tem efeito**: o container usa o bundle da
+imagem publicada. O deploy real é:
+
+```
+1. git push (fork)         → GitHub Actions "Publicar imagem Docker (GHCR)" (~8-10 min)
+2. ssh vps; cd /opt/apps/deskcomm
+3. docker compose -f docker-compose.prod.yml -f docker-compose.traefik.yml pull app worker scheduler
+4. docker compose -f docker-compose.prod.yml -f docker-compose.traefik.yml up -d app worker scheduler
+5. Validar: docker inspect <container> --format '{{index .Config.Labels "org.opencontainers.image.revision"}}'
+```
+
+### Onde vive cada configuração
+
+| Necessidade | Onde |
+|---|---|
+| Acesso da IA no canal (teste × público) | **Canais › Conexões › Configurar acesso da IA** |
+| Qual modelo atende cada ponto | **Agente de IA › "Ver tudo em IA" › Provedores** |
+| Credencial do provedor | **Agente de IA › "Ver tudo em IA" › Credenciais** |
+| Notificações (Web Push) | **Configurações › Notificações** (coluna Push) |
+| Por que a IA não respondeu | **Central de avisos** + log do worker |
+| Auditoria de mudança | **Configurações › Audit** |
+
+### Web Push exige DUAS coisas
+
+1. **Chaves VAPID** no `.env` do servidor (`VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY`) —
+   gerar com `npx web-push generate-vapid-keys --json`
+2. **Inscrição do navegador** em `push_subscriptions` — feita em Configurações › Notificações
+
+Sem a primeira, o handler pula com `vapid_ausente`. Sem a segunda, não há para onde enviar.
+
+### Diagnóstico rápido
+
+| Sintoma no log | Significado |
+|---|---|
+| `ai-response-worker.v1: agent_inactive_or_missing` | **NORMAL** — worker legado desligado por design; quem responde é o agent-engine |
+| `ai-sentiment-worker.v1: nao_elegivel_para_ia` | O gate do canal barrou (fora da lista de teste) |
+| `drain: mídia ainda sendo transcrita — turno adiado` | A espera da derivação está funcionando |
+| `web-push-inbound.v1: vapid_ausente` | Faltam as chaves VAPID |
