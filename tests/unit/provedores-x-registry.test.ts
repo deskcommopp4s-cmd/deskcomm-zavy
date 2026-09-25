@@ -65,6 +65,26 @@ describe("a OpenRouter entrou de fato", () => {
   });
 });
 
+describe("a Z.ai entrou de fato", () => {
+  it("está na lista e no registry", () => {
+    expect(ehProvedorSuportado("zai")).toBe(true);
+    expect(registry["zai"]).toBeTypeOf("function");
+  });
+
+  it("é declarada como sincronizável — tem catálogo de modelos", () => {
+    expect(PROVEDOR_POR_ID.get("zai")?.catalogoSincronizavel).toBe(true);
+  });
+
+  it("aceita endpoint próprio — é OpenAI-compatível, como DeepSeek", () => {
+    expect(PROVEDOR_POR_ID.get("zai")?.aceitaEndpointProprio).toBe(true);
+  });
+
+  it("a fábrica aceita o terceiro argumento (baseUrl)", () => {
+    const modelo = registry["zai"]!("chave-de-teste", "glm-5.3-flash", "https://gateway.exemplo/v1");
+    expect(modelo).toBeDefined();
+  });
+});
+
 describe("forma de cada provedor", () => {
   it("cada um explica quando usar, em português de gente", () => {
     for (const p of PROVEDORES) {

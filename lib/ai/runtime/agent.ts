@@ -36,6 +36,7 @@ import {
   normalizarRaciocinioDeepseek,
   OPENROUTER_ENDPOINT,
   type RaciocinioDeepseek,
+  ZAI_ENDPOINT,
 } from "@/lib/agent-engine/edge/llm/providers";
 import { CredentialUnavailableError, loadCredential } from "@/lib/ai/credentials";
 import { decidirElegibilidadeDaConversaViaSupabase } from "@/lib/ai/elegibilidade/consulta-supabase";
@@ -222,6 +223,9 @@ export function buildModel(
         baseURL: DEEPSEEK_ENDPOINT,
         ...(deepseekThinking === "disabled" ? { fetch: comRaciocinioDesligado(fetch) } : {}),
       })(modelId);
+    // Z.ai (GLM) — OpenAI-compatível, mesma fábrica do registry de produção.
+    case "zai":
+      return createOpenAI({ apiKey, baseURL: ZAI_ENDPOINT })(modelId);
     default:
       throw new Error(`unsupported_provider: ${provider}`);
   }

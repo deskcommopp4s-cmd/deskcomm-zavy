@@ -63,6 +63,8 @@ export const OPENROUTER_ENDPOINT = 'https://openrouter.ai/api/v1';
  * `reasoning.effort`. Ver `comRaciocinioDesligado`, logo abaixo.
  */
 export const DEEPSEEK_ENDPOINT = 'https://api.deepseek.com';
+/** Z.ai (GLM) — OpenAI-compatível; a raiz documentada é `/api/paas/v4`. */
+export const ZAI_ENDPOINT = 'https://api.z.ai/api/paas/v4';
 
 /**
  * Cabeçalhos OPCIONAIS de atribuição da OpenRouter.
@@ -236,6 +238,15 @@ export function createDefaultRegistry(opts?: {
       const fetchFinal =
         opts?.deepseekThinking === 'disabled' ? comRaciocinioDesligado(contido) : contido;
       return createOpenAI({ apiKey, baseURL: endpoint, fetch: fetchFinal })(modelId);
+    },
+    /**
+     * Z.ai (GLM) é OpenAI-compatível e aceita `base_url` próprio pela mesma
+     * razão da OpenRouter/DeepSeek: o painel oferece apontar para um gateway, e
+     * a allowlist do egress precisa ser a DELE.
+     */
+    zai: (apiKey, modelId, baseUrl) => {
+      const endpoint = baseUrl ?? ZAI_ENDPOINT;
+      return createOpenAI({ apiKey, baseURL: endpoint, fetch: contain(endpoint) })(modelId);
     },
   };
 }

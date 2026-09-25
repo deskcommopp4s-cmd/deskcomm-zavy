@@ -16,6 +16,7 @@ describe("createDefaultRegistry", () => {
       "google",
       "openai",
       "openrouter",
+      "zai",
     ]);
   });
   it("cada factory produz um LanguageModel (não lança ao instanciar)", () => {

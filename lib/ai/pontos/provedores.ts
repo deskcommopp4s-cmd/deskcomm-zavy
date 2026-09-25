@@ -93,6 +93,16 @@ export const PROVEDORES = [
     ondePegarAChave: "https://platform.deepseek.com/api_keys",
     prefixoDaChave: "sk-…",
   },
+  {
+    id: "zai",
+    rotulo: "Z.ai (GLM)",
+    quandoUsar:
+      "Modelos GLM muito baratos (GLM-5.3-Flash a US$0,15/M de entrada) — alternativa de custo para conversar e classificar, com API compatível com a OpenAI.",
+    aceitaEndpointProprio: true,
+    catalogoSincronizavel: true,
+    ondePegarAChave: "https://z.ai/manage-apikey/apikey-list",
+    prefixoDaChave: "…",
+  },
 ] as const satisfies readonly ProvedorSuportado[];
 // `as const satisfies` e não anotação de tipo: a anotação apagaria os literais
 // e `Provider` viraria `string`, deixando o compilador aceitar qualquer texto

@@ -211,6 +211,31 @@ export async function validateDeepSeekKey(apiKey: string): Promise<ValidationRes
 }
 
 /**
+ * Z.ai (GLM) — OpenAI-compatível; a listagem é `GET /api/paas/v4/models`.
+ * Mesma régua dos outros: 401/403 = chave errada; qualquer outro não-2xx é
+ * status do provedor; o corpo é a lista de modelos.
+ */
+export async function validateZaiKey(apiKey: string): Promise<ValidationResult> {
+  try {
+    const res = await timedFetch("https://api.z.ai/api/paas/v4/models", {
+      method: "GET",
+      headers: { Authorization: `Bearer ${apiKey}` },
+    });
+    if (res.status === 401 || res.status === 403) {
+      return { ok: false, error: "auth_failed_401" };
+    }
+    if (!res.ok) {
+      return { ok: false, error: `provider_status_${res.status}` };
+    }
+    const json = (await res.json()) as { data?: { id: string }[] };
+    const models = (json.data ?? []).map((m) => m.id).filter(Boolean);
+    return { ok: true, models };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.name : "network_error" };
+  }
+}
+
+/**
  * Os provedores cuja chave as rotas de credencial sabem cadastrar: os de conversa
  * mais os de decisão. É a união que a rota de credenciais usa no `z.enum` — sem
  * ela, o operador não tinha onde colar a chave da TypeSafe.
@@ -250,6 +275,8 @@ export function validateProviderKey(
       return validateOpenRouterKey(apiKey);
     case "deepseek":
       return validateDeepSeekKey(apiKey);
+    case "zai":
+      return validateZaiKey(apiKey);
     default: {
       // Sem `never` aqui: `Provider` agora é derivado de PROVEDORES, e a lista
       // cresce sem que este arquivo saiba. Provedor novo cadastrado antes de

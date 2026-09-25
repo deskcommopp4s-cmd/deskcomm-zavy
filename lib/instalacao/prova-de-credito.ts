@@ -23,6 +23,7 @@ import {
   cabecalhosDeAtribuicaoOpenRouter,
   DEEPSEEK_ENDPOINT,
   OPENROUTER_ENDPOINT,
+  ZAI_ENDPOINT,
 } from "@/lib/agent-engine/edge/llm/providers";
 
 export type ResultadoDaProva =
@@ -97,6 +98,14 @@ export function montarRequisicaoDeProva(
       // GERAÇÃO, não a listagem `GET /models` (que o validador de chave já usa).
       return {
         url: `${baseUrl ?? DEEPSEEK_ENDPOINT}/chat/completions`,
+        headers: { authorization: `Bearer ${apiKey}`, "content-type": "application/json" },
+        body: { model: modelo, max_tokens: 1, messages: msg },
+      };
+    case "zai":
+      // Z.ai (GLM) — OpenAI-compatível, mesma régua da DeepSeek: geração mínima
+      // com `max_tokens: 1`, não a listagem.
+      return {
+        url: `${baseUrl ?? ZAI_ENDPOINT}/chat/completions`,
         headers: { authorization: `Bearer ${apiKey}`, "content-type": "application/json" },
         body: { model: modelo, max_tokens: 1, messages: msg },
       };
