@@ -49,30 +49,40 @@ const ACTION = join(process.cwd(), ".github/actions/preparar-node/action.yml");
  */
 const TETOS: Record<string, { minutos: number; razao: string }> = {
   "ci.yml::verify": {
-    minutos: 25,
+    minutos: 35,
     // Era 15, calibrado quando a suíte terminava em p90 594s / máximo 609s.
     //
     // O teto fez o trabalho dele: denunciou. Medido no histórico do repositório,
     // o passo morria por RELÓGIO em 14 runs consecutivos, sempre `cancelled` aos
     // ~917s, e a série começa ANTES de qualquer mudança desta semana (primeiro
-    // caso observado: `d14bee86`, 17/09) — ou seja, não foi um push que
-    // estourou: a suíte passou a não caber, e o job deixou de dar veredito por
-    // dias sem ninguém notar, porque um CI que sempre morre no mesmo lugar
-    // parece "normal".
+    // caso observado: `d14bee86`, 17/09) — não foi um push que estourou: a
+    // suíte passou a não caber, e o job deixou de dar veredito por dias sem
+    // ninguém notar, porque um CI que sempre morre no mesmo lugar parece
+    // "normal".
     //
-    // POR QUE O TRABALHO CRESCEU — o que se sabe e o que NÃO se sabe: a suíte
-    // tem hoje 685 arquivos / 7.044 casos e roda em 306s nesta máquina de
-    // desenvolvimento (medido). No runner do plano gratuito, que é menor, ela
-    // não termina em 917s. A causa do crescimento NÃO foi isolada aqui: o 25 é
-    // DECLARADO, não medido no runner, e existe para o vermelho voltar a falar
-    // de teste. Isolar o que cresceu (o custo de jsdom por arquivo é o suspeito
-    // natural — `environment` somou 944s no run local) fica como dívida aberta,
-    // não como algo resolvido por este número.
+    // POR QUE O TRABALHO CRESCEU — agora medido, não estimado. Com o teto em 25
+    // o job COMPLETOU: 1425s (23min45s), contra os 594s da calibração. É mais
+    // que o DOBRO. O preâmbulo (setup + typecheck + lint) responde por ~150s;
+    // o resto é a suíte, ~1275s no runner contra 306s nesta máquina de
+    // desenvolvimento — o runner do plano gratuito é ~4x mais lento, e é por
+    // isso que o mesmo comando dá 5min aqui e 21min lá.
+    //
+    // O 35 é DECLARADO com a folga que o 25 não tinha: 1425s contra um teto de
+    // 1500s deixava 75 SEGUNDOS, e a próxima variação de runner derrubaria o job
+    // de novo — trocaria um vermelho crônico por um verde frágil. 2100s dá ~11
+    // min de margem.
+    //
+    // DÍVIDA ABERTA, e não "resolvida" por ter subido o número: o custo real é
+    // o `environment` do jsdom, que somou 944s no run local contra 252s de
+    // testes — o setup do DOM por arquivo domina. Reduzir isso (menos arquivos
+    // em jsdom, ou configuração mais leve) é o conserto de verdade, e é trabalho
+    // de outra sessão.
     razao:
-      "o teto de 15 era calibrado em p90 594s e vinha sendo estourado em TODOS os runs desde 17/09 " +
-      "(14 consecutivos, sempre cancelled aos ~917s); a suíte cresceu e não caber mais não é hipótese, " +
-      "é observação. O 25 é DECLARADO (não medido no runner) e devolve veredito; a causa do crescimento " +
-      "segue não isolada",
+      "o teto de 15 era calibrado em p90 594s e vinha sendo estourado em TODOS os runs desde 17/09. " +
+      "Medido agora: o job completa em 1425s (23min45s) — mais que o DOBRO da calibração, com a suíte " +
+      "em ~1275s contra 306s nesta máquina (o runner gratuito é ~4x mais lento). O 35 dá ~11min de " +
+      "folga; o 25 dava 75 SEGUNDOS e cairia na próxima variação. A causa raiz — custo de jsdom por " +
+      "arquivo (environment = 944s localmente, contra 252s de testes) — segue NÃO resolvida",
   },
   // O agregado `invariants` NÃO tem teto de propósito: ele não roda a suíte, só
   // lê o desfecho de `needs`. O teto que denuncia a suíte crescendo vive na perna
