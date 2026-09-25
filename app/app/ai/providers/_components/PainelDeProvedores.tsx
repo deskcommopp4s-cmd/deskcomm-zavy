@@ -246,7 +246,57 @@ function CartaoDoPadrao({ dados, aoSalvar }: { dados: Dados; aoSalvar: () => Pro
   const t = useT();
   const [provider, setProvider] = useState(dados.padrao.provider);
   const [modelId, setModelId] = useState(dados.padrao.defaultModel ?? "");
+  const [credentialId, setCredentialId] = useState("");
   const [salvando, setSalvando] = useState(false);
+  // O teste AQUI é o pré-voo de uma troca que alcança `herdam.length` pontos de
+  // uma vez. É a mesma prova do `CartaoDoPonto` — geração mínima contra o
+  // provedor —, mas com peso diferente: lá uma configuração errada estraga um
+  // ponto; aqui estraga todos os que herdam. `null` = ainda não testou; guardar
+  // o último MOTIVO (e não um booleano) é o que permite dizer o que falhou.
+  const [testando, setTestando] = useState(false);
+  const [teste, setTeste] = useState<
+    { ok: true } | { ok: false; codigo: string; mensagem: string } | null
+  >(null);
+
+  const credsDoProvedor = dados.credenciais.filter((c) => c.provider === provider);
+
+  async function testar() {
+    setTestando(true);
+    setTeste(null);
+    try {
+      const res = await fetch("/api/v1/ai/providers/test", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          provider,
+          model_id: modelId,
+          credential_id: credentialId || null,
+          // O padrão NÃO carrega endereço próprio — isso vive em cada ponto.
+          // A pergunta daqui é "este provedor + este modelo + esta chave
+          // respondem?", que é exatamente o que a troca em massa pressupõe. O
+          // gateway próprio se testa no ponto, onde o endereço é configurado.
+          base_url: null,
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        setTeste({
+          ok: false,
+          codigo: json?.error?.code ?? "erro",
+          mensagem: json?.error?.message ?? t("não consegui testar"),
+        });
+        return;
+      }
+      const r = json?.data as { ok: true } | { ok: false; codigo: string; mensagem: string };
+      setTeste(r.ok ? { ok: true } : { ok: false, codigo: r.codigo, mensagem: r.mensagem });
+    } catch {
+      // Rede da PRÓPRIA tela caiu — não é veredito sobre a configuração, e
+      // dizer "falhou" aqui mandaria o operador trocar uma chave que está certa.
+      setTeste({ ok: false, codigo: "rede", mensagem: t("não consegui alcançar o servidor") });
+    } finally {
+      setTestando(false);
+    }
+  }
 
   const modelosDoProvedor = useMemo(
     () => dados.modelos.filter((m) => m.provider === provider),
@@ -311,6 +361,10 @@ function CartaoDoPadrao({ dados, aoSalvar }: { dados: Dados; aoSalvar: () => Pro
               // sincronizado a rota confere o par (provider, model_id) e
               // devolveria 404.
               setModelId("");
+              // Credencial de outro provedor idem — e o veredito anterior era
+              // sobre OUTRO par, então não sobrevive à troca.
+              setCredentialId("");
+              setTeste(null);
             }}
           >
             <SelectTrigger data-testid="padrao-provider">
@@ -342,7 +396,10 @@ function CartaoDoPadrao({ dados, aoSalvar }: { dados: Dados; aoSalvar: () => Pro
             <>
               <Input
                 value={modelId}
-                onChange={(e) => setModelId(e.target.value)}
+                onChange={(e) => {
+                  setModelId(e.target.value);
+                  setTeste(null);
+                }}
                 placeholder="ex.: meta-llama/llama-3.3-70b-instruct"
                 data-testid="padrao-modelo"
               />
@@ -353,7 +410,13 @@ function CartaoDoPadrao({ dados, aoSalvar }: { dados: Dados; aoSalvar: () => Pro
               </p>
             </>
           ) : (
-            <Select value={modelId} onValueChange={setModelId}>
+            <Select
+              value={modelId}
+              onValueChange={(v) => {
+                setModelId(v);
+                setTeste(null);
+              }}
+            >
               <SelectTrigger data-testid="padrao-modelo">
                 <SelectValue placeholder={t("escolha")} />
               </SelectTrigger>
@@ -368,6 +431,29 @@ function CartaoDoPadrao({ dados, aoSalvar }: { dados: Dados; aoSalvar: () => Pro
           )}
         </div>
 
+        <div className="min-w-56">
+          <Label className="text-xs">{t("Credenciais")}</Label>
+          <Select
+            value={credentialId}
+            onValueChange={(v) => {
+              setCredentialId(v);
+              // Trocar de credencial troca o que foi provado.
+              setTeste(null);
+            }}
+          >
+            <SelectTrigger data-testid="padrao-credencial">
+              <SelectValue placeholder={t("da instalação")} />
+            </SelectTrigger>
+            <SelectContent>
+              {credsDoProvedor.map((c) => (
+                <SelectItem key={c.id} value={c.id}>
+                  {c.label} ••{c.api_key_last4 ?? "??"}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
         {dados.podeEditar && (
           <Button
             size="sm"
@@ -378,7 +464,50 @@ function CartaoDoPadrao({ dados, aoSalvar }: { dados: Dados; aoSalvar: () => Pro
             {salvando ? t("Salvando…") : t("Salvar padrão")}
           </Button>
         )}
+
+        {/* O TESTE, no card que o operador olha primeiro. Ele estava só dentro
+            de "Configuração avançada" — um nível abaixo —, atrás de um rótulo
+            que não sugere "aqui você testa": quem não sabia que a função existia
+            não a encontrava. Aqui ele vem ANTES da troca que atinge todos os
+            pontos herdados, que é quando a informação ainda muda a decisão. */}
+        {dados.podeEditar && (
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={testando || salvando || !modelId || !credentialId}
+            onClick={() => void testar()}
+            data-testid="testar-padrao"
+          >
+            {testando ? t("Testando…") : t("Testar")}
+          </Button>
+        )}
+        {dados.podeEditar && !credentialId && (
+          <span className="text-xs text-muted-foreground">
+            {t("Escolha a credencial da empresa para poder testar.")}
+          </span>
+        )}
       </div>
+
+      {teste && (
+        <p
+          role="status"
+          data-testid="resultado-teste-padrao"
+          className={
+            teste.ok
+              ? "mt-3 rounded-md border border-emerald-600/40 bg-emerald-500/10 p-2 text-xs"
+              : "mt-3 rounded-md border border-amber-500/40 bg-amber-500/10 p-2 text-xs"
+          }
+        >
+          {teste.ok ? (
+            t("Respondeu. A chave funciona para este modelo em todos os pontos que herdam.")
+          ) : (
+            <>
+              <span className="font-medium">{t("Não respondeu:")}</span> {t(teste.mensagem)}{" "}
+              <span className="font-mono text-muted-foreground">({teste.codigo})</span>
+            </>
+          )}
+        </p>
+      )}
 
       {especialistas.length > 0 && (
         <p className="mt-3 text-xs text-muted-foreground" data-testid="padrao-especialistas">

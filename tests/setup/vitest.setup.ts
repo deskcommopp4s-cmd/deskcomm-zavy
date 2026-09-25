@@ -79,3 +79,54 @@ if (typeof globalThis.ResizeObserver === "undefined") {
     disconnect() {}
   };
 }
+
+/**
+ * jsdom também não implementa a API de PONTEIRO que o Radix usa para abrir
+ * Select/DropdownMenu. O sintoma é cruel e não parece falta de polyfill:
+ * o clique abre o conteúdo, o `<ForwardRef(SelectContentImpl)>` estoura e o
+ * React **desmonta a árvore** — o teste seguinte falha com "Unable to find an
+ * element", como se o componente tivesse sumido por defeito de produto.
+ *
+ * Medido ao escrever o teste do botão "Testar" do card "Modelo padrão"
+ * (`tests/unit/provedores-testar-no-cartao-do-padrao.test.tsx`): 9 de 9 testes
+ * reprovavam com "An error occurred in the <ForwardRef(SelectContentImpl)>".
+ * Com estes três métodos (e o PointerEvent), a seleção funciona.
+ *
+ * São métodos que o jsdom deveria ter; preenchê-los não afrouxa asserção
+ * nenhuma — só deixa o componente chegar ao estado que o teste quer medir.
+ */
+if (typeof Element !== "undefined") {
+  if (!Element.prototype.hasPointerCapture) {
+    Element.prototype.hasPointerCapture = function hasPointerCapture() {
+      return false;
+    };
+  }
+  if (!Element.prototype.setPointerCapture) {
+    Element.prototype.setPointerCapture = function setPointerCapture() {};
+  }
+  if (!Element.prototype.releasePointerCapture) {
+    Element.prototype.releasePointerCapture = function releasePointerCapture() {};
+  }
+  if (!Element.prototype.scrollIntoView) {
+    Element.prototype.scrollIntoView = function scrollIntoView() {};
+  }
+}
+
+/**
+ * ⚠️ Só quando existe DOM. Vários arquivos rodam com `@vitest-environment node`
+ * (extração de PDF, LGPD, transporte do Google) e neste setup roda para TODOS
+ * eles: tocar `MouseEvent` ali estoura com "MouseEvent is not defined" e levava
+ * o arquivo inteiro junto — 7 arquivos vermelhos por um polyfill de browser.
+ */
+if (typeof globalThis.MouseEvent !== "undefined" && typeof globalThis.PointerEvent === "undefined") {
+  // `MouseEvent` é o pai mais próximo disponível no jsdom; o Radix só lê
+  // `pointerType`/`button`, que a subclasse preserva.
+  class PointerEventPolyfill extends MouseEvent {
+    pointerType: string;
+    constructor(type: string, params: MouseEventInit & { pointerType?: string } = {}) {
+      super(type, params);
+      this.pointerType = params.pointerType ?? "mouse";
+    }
+  }
+  globalThis.PointerEvent = PointerEventPolyfill as unknown as typeof PointerEvent;
+}

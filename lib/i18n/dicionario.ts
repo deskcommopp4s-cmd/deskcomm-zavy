@@ -8962,6 +8962,38 @@ export const DICIONARIO: Traducoes = {
   "Desligado: o agente só avança o card, como sempre.": {
     es: "Desactivado: el agente solo avanza la tarjeta, como siempre.",
   },
+  // AgentForm.tsx (aviso "editado e não publicado") — o aviso é montado em
+  // PEDAÇOS, porque o número da versão é interpolado no meio da frase. Cada
+  // pedaço precisa da sua linha: sem ela a frase sai meio em espanhol, meio em
+  // português, que é pior que não traduzir. O espanhol monta na mesma ordem, o
+  // que é o que permite manter os pedaços curtos assim.
+  "No ar": { es: "En vivo" },
+  "suas edições (v": { es: "tus ediciones (v" },
+  ") ainda não": { es: ") aún no" },
+  "O que está no ar é a v": { es: "Lo que está en vivo es la v" },
+  " — suas edições no rascunho v": { es: " — tus ediciones en el borrador v" },
+  " ainda não valem": { es: " aún no valen" },
+  "O agente continua respondendo com a versão publicada até você clicar em Publicar.": {
+    es: "El agente sigue respondiendo con la versión publicada hasta que hagas clic en Publicar.",
+  },
+  // PainelDeProvedores.tsx (botão "Testar" e o veredito do teste).
+  "Testar": { es: "Probar" },
+  "Escolha a credencial da empresa para poder testar.": {
+    es: "Elige la credencial de la empresa para poder probar.",
+  },
+  "não consegui testar": { es: "no pude probar" },
+  "não consegui alcançar o servidor": { es: "no pude alcanzar el servidor" },
+  "Respondeu. A chave e o endereço funcionam para este modelo.": {
+    es: "Respondió. La clave y la dirección funcionan para este modelo.",
+  },
+  "Respondeu. A chave funciona para este modelo em todos os pontos que herdam.": {
+    es: "Respondió. La clave funciona para este modelo en todos los puntos que heredan.",
+  },
+  "Não respondeu:": { es: "No respondió:" },
+  // contacts/_client.tsx (botão de desbloquear contato). "Desbloquear" é a mesma
+  // palavra nos dois idiomas — a linha existe porque a chave precisa declarar o
+  // espanhol, e é o guarda que cobra isso, não a memória de quem escreve.
+  "Desbloquear": { es: "Desbloquear" },
 };
 
 /**
