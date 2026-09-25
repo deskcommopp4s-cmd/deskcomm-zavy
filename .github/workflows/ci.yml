@@ -25,7 +25,11 @@ permissions:
 jobs:
   verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # Era 15 e o passo morria por relógio em TODOS os runs desde 17/09 (~917s,
+    # 14 seguidos), sem veredito. A razão completa está em
+    # tests/unit/preambulo-do-ci-nao-come-o-relogio.test.ts (`TETOS`), que é
+    # quem cobra esta linha.
+    timeout-minutes: 25
     # Fork Opp4System: repo PRIVADO no plano gratuito usa runner menor (7 GB em
     # vez de 16 GB) e o `tsc --noEmit` do repo inteiro estoura o heap padrão do
     # Node ("JavaScript heap out of memory"). Teto explícito resolve.

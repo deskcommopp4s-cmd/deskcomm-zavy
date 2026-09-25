@@ -49,8 +49,30 @@ const ACTION = join(process.cwd(), ".github/actions/preparar-node/action.yml");
  */
 const TETOS: Record<string, { minutos: number; razao: string }> = {
   "ci.yml::verify": {
-    minutos: 15,
-    razao: "trabalho real medido: p90 594s, máximo 609s em 51 verdes — folga de ~4m45",
+    minutos: 25,
+    // Era 15, calibrado quando a suíte terminava em p90 594s / máximo 609s.
+    //
+    // O teto fez o trabalho dele: denunciou. Medido no histórico do repositório,
+    // o passo morria por RELÓGIO em 14 runs consecutivos, sempre `cancelled` aos
+    // ~917s, e a série começa ANTES de qualquer mudança desta semana (primeiro
+    // caso observado: `d14bee86`, 17/09) — ou seja, não foi um push que
+    // estourou: a suíte passou a não caber, e o job deixou de dar veredito por
+    // dias sem ninguém notar, porque um CI que sempre morre no mesmo lugar
+    // parece "normal".
+    //
+    // POR QUE O TRABALHO CRESCEU — o que se sabe e o que NÃO se sabe: a suíte
+    // tem hoje 685 arquivos / 7.044 casos e roda em 306s nesta máquina de
+    // desenvolvimento (medido). No runner do plano gratuito, que é menor, ela
+    // não termina em 917s. A causa do crescimento NÃO foi isolada aqui: o 25 é
+    // DECLARADO, não medido no runner, e existe para o vermelho voltar a falar
+    // de teste. Isolar o que cresceu (o custo de jsdom por arquivo é o suspeito
+    // natural — `environment` somou 944s no run local) fica como dívida aberta,
+    // não como algo resolvido por este número.
+    razao:
+      "o teto de 15 era calibrado em p90 594s e vinha sendo estourado em TODOS os runs desde 17/09 " +
+      "(14 consecutivos, sempre cancelled aos ~917s); a suíte cresceu e não caber mais não é hipótese, " +
+      "é observação. O 25 é DECLARADO (não medido no runner) e devolve veredito; a causa do crescimento " +
+      "segue não isolada",
   },
   // O agregado `invariants` NÃO tem teto de propósito: ele não roda a suíte, só
   // lê o desfecho de `needs`. O teto que denuncia a suíte crescendo vive na perna
