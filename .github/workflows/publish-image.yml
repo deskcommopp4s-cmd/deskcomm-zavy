@@ -673,3 +673,83 @@ jobs:
           [ "${{ needs.build-and-push.result }}" = "success" ]
           [ "${{ needs.imagem-do-app-sobe.result }}" = "success" ]
           [ "${{ needs.imagens-de-fundo-sobem.result }}" = "success" ]
+
+  # O GHCR guarda TODA versão publicada para sempre, e cada ciclo publica TRÊS
+  # imagens (~630 MB comprimidos: app 177 + worker 447 + scheduler 6). No plano
+  # Free o storage incluído de packages é 500 MB — a conta estourou ~50 GB em 8
+  # dias (102 versões × 3 imagens, medido em 25/09/2026) até o GHCR recusar
+  # push. Nenhuma versão é removida por conta própria: sem poda, o acúmulo
+  # volta em questão de dias.
+  #
+  # Este job poda na FONTE, ao fim de cada publicação bem-sucedida:
+  #   • NUNCA toca versão com TAG (`latest`, `main`, `stable`, `vX.Y.Z`) — é o
+  #     que o VPS e o instalador puxam;
+  #   • mantém as KEEP_ULTIMAS mais recentes (janela de rollback), mesmo sem tag;
+  #   • apaga só o que é untagged E tem mais de DIAS dias — deixa a janela do
+  #     último deploy intacta e elimina o acúmulo de histórico.
+  # Token: o GITHUB_TOKEN publica estas imagens, então o repo tem admin sobre os
+  # packages e a REST API aceita o delete (docs "Deleting and restoring a
+  # package"). Se um dia o delete for negado, o job FALHA ALTO (exit 1) em vez
+  # de fingir que limpou — poda é hygiene e não pode virar silêncio.
+  limpar-versoes-ghcr:
+    if: github.event_name != 'pull_request'
+    needs: [imagens-ok]
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+    env:
+      KEEP_ULTIMAS: "3"
+      DIAS: "1"
+    steps:
+      - name: Podar versões untagged antigas do GHCR
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          dono=$(printf '%s' "${GITHUB_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')
+          base="https://api.github.com/users/${dono}/packages/container"
+          agora=$(date +%s)
+          corte=$(( agora - DIAS * 86400 ))
+          for img in deskcommcrm deskcomm-worker deskcomm-scheduler; do
+            echo "::group::${img}"
+            rm -f /tmp/vs.json
+            pagina=1
+            while :; do
+              resp=$(curl -fsSL \
+                -H "Authorization: Bearer ${GH_TOKEN}" \
+                -H "Accept: application/vnd.github+json" \
+                "${base}/${img}/versions?per_page=100&page=${pagina}") || break
+              printf '%s\n' "$resp" >> /tmp/vs.json
+              [ "$(printf '%s' "$resp" | jq 'length')" -lt 100 ] && break
+              pagina=$((pagina + 1))
+            done
+            jq -s 'add' /tmp/vs.json > /tmp/vs_all.json
+            total=$(jq 'length' /tmp/vs_all.json)
+            jq -r --argjson k "${KEEP_ULTIMAS}" \
+              'sort_by(.created_at) | reverse | .[:$k][] | .id' \
+              /tmp/vs_all.json > /tmp/keep.txt
+            jq -r --argjson corte "${corte}" \
+              '.[] | select((.metadata.container.tags // []) | length == 0) | select((.created_at | fromdateiso8601) < $corte) | .id' \
+              /tmp/vs_all.json > /tmp/poda.txt
+            apagadas=0
+            while read -r id; do
+              grep -qx "$id" /tmp/keep.txt && continue
+              code=$(curl -s -o /dev/null -w '%{http_code}' -X DELETE \
+                -H "Authorization: Bearer ${GH_TOKEN}" \
+                -H "Accept: application/vnd.github+json" \
+                "${base}/${img}/versions/${id}")
+              if [ "$code" = "204" ]; then
+                apagadas=$((apagadas + 1))
+              else
+                echo "  ::warning::delete da versão ${id} retornou HTTP ${code}"
+              fi
+            done < /tmp/poda.txt
+            candidatas=$(wc -l < /tmp/poda.txt | tr -d ' ')
+            echo "total=${total} | candidatas=${candidatas} | apagadas=${apagadas}"
+            if [ "${candidatas}" -gt 0 ] && [ "${apagadas}" -eq 0 ]; then
+              echo "::error::${candidatas} versões para podar e nenhuma apagada — o GITHUB_TOKEN perdeu permissão de delete?"
+              echo "::error::docs: repo que publica no package tem admin e deleta via REST; se negado, checar packages:write do job."
+              exit 1
+            fi
+            echo "::endgroup::"
+          done
