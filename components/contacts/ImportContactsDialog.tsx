@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useImportContacts } from "@/hooks/contacts/useImportContacts";
+import { gerarModeloDeImportacao, NOME_DO_MODELO } from "@/lib/contacts/modelo-de-importacao";
 
 interface Props {
   open: boolean;
@@ -35,6 +36,36 @@ export function ImportContactsDialog({ open, onOpenChange }: Props) {
   function reset() {
     setFile(null);
     setResumo(null);
+  }
+
+  /**
+   * Baixa a planilha modelo — o ARQUIVO, não a descrição dele.
+   *
+   * A prosa desta tela já dizia quais colunas existem. Quem nunca importou
+   * nada lê isso e adivinha o resto: separador, formato de data, se campo
+   * vazio pode, se telefone com máscara serve. Cada dúvida dessas é uma
+   * tentativa e erro sobre uma planilha de 300 linhas, e o erro só aparece
+   * DEPOIS de subir o arquivo inteiro.
+   *
+   * O conteúdo sai de `gerarModeloDeImportacao`, que é testado contra o próprio
+   * importador — um modelo que a rota recusasse seria pior que nenhum.
+   */
+  function baixarModelo() {
+    const csv = gerarModeloDeImportacao();
+    // `charset=utf-8` no tipo E o BOM no conteúdo: são caminhos diferentes para
+    // o mesmo problema. O BOM é o que o Excel lê para não estragar acento, e o
+    // charset cobre quem abre o arquivo por outros meios. Custa dois bytes.
+    const blob = new Blob(["\uFEFF", csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = NOME_DO_MODELO;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    // Revogar no mesmo tique já cancelou o download em navegador antigo; o
+    // adiamento deixa o download começar antes de liberar a URL.
+    setTimeout(() => URL.revokeObjectURL(url), 0);
   }
 
   async function onSubmit(e: React.FormEvent) {
@@ -76,6 +107,28 @@ export function ImportContactsDialog({ open, onOpenChange }: Props) {
         <form onSubmit={onSubmit} className="space-y-4">
           {!resumo && (
             <>
+              {/*
+                O MODELO VEM ANTES DO CAMPO DE ARQUIVO — quem chegou aqui sem
+                planilha pronta é quem mais precisa dele, e essa pessoa está
+                olhando para o campo vazio. Quem já tem a planilha no formato
+                certo ignora a linha e segue para o input, que continua logo
+                abaixo no mesmo lugar de sempre.
+              */}
+              <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border bg-surface p-3">
+                <p className="text-xs text-muted-foreground">
+                  {t("Não tem a planilha pronta? Baixe o modelo e preencha por cima dos exemplos.")}
+                </p>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={baixarModelo}
+                  data-testid="baixar-modelo-planilha"
+                >
+                  {t("Baixar planilha modelo")}
+                </Button>
+              </div>
+
               <div className="space-y-2">
                 <Label htmlFor="csv-file">{t("Arquivo CSV")}</Label>
                 <Input

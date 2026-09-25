@@ -242,8 +242,13 @@ function detectDelimiter(text: string): string {
  * Aceita apelidos pt-BR/en porque a planilha é feita por humano: quem importa
  * tem "Telefone" no Excel, não "phone_number". Acento/caixa/separador são
  * normalizados ("Data de Nascimento" → data_de_nascimento).
+ *
+ * Exportado porque o MODELO da planilha (`lib/contacts/modelo-de-importacao.ts`)
+ * monta o cabeçalho a partir da PRIMEIRA forma de cada lista. Duas listas de
+ * nomes de coluna envelhecem em direções diferentes, e a que ninguém lembra de
+ * atualizar é a do modelo — que é justamente a que o usuário vai copiar.
  */
-const HEADER_ALIASES: Record<string, readonly string[]> = {
+export const HEADER_ALIASES: Record<string, readonly string[]> = {
   name: ["name", "nome", "cliente"],
   display_name: ["display_name", "apelido", "nome_de_exibicao"],
   email: ["email", "e_mail"],

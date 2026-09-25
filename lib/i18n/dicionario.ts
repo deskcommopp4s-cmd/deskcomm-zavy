@@ -8994,6 +8994,13 @@ export const DICIONARIO: Traducoes = {
   // palavra nos dois idiomas — a linha existe porque a chave precisa declarar o
   // espanhol, e é o guarda que cobra isso, não a memória de quem escreve.
   "Desbloquear": { es: "Desbloquear" },
+  // ImportContactsDialog.tsx (a planilha modelo, baixável). "Baixar planilha
+  // modelo" já existia, vinda do import de LEADS (linha ~7565) — a mesma frase
+  // serve aos dois, e reaproveitar é o que mantém as duas telas iguais. A única
+  // entrada nova é a frase de apoio.
+  "Não tem a planilha pronta? Baixe o modelo e preencha por cima dos exemplos.": {
+    es: "¿No tienes la hoja lista? Descarga la plantilla y rellénala sobre los ejemplos.",
+  },
 };
 
 /**
