@@ -35,8 +35,13 @@ vi.mock("@/lib/supabase/server", () => ({
   createClient: async () => ({
     rpc: async () => ({ data: null, error: null }),
     auth: {
-      getUser: async () => ({
-        data: { user: { id: "u1", email: "a@b.c", user_metadata: {} } },
+      // `getClaims`, e não `getUser`: a verificação passou a ser LOCAL (a
+      // assinatura do JWT, pela WebCrypto) e o que a função lê agora é
+      // `data.claims`, cujo `sub` é o id do usuário. Um dublê de `getUser`
+      // aqui não é chamado nunca — e o teste reprova por falta do dublê, não
+      // por defeito do produto.
+      getClaims: async () => ({
+        data: { claims: { sub: "u1", email: "a@b.c", user_metadata: {} } },
         error: null,
       }),
     },
