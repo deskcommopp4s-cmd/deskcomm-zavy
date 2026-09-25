@@ -18,7 +18,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useT } from "@/hooks/i18n/useT";
-import { UploadSimple } from "@/lib/ui/icons";
+import { DownloadSimple, UploadSimple } from "@/lib/ui/icons";
 
 import type { FunilDaLista } from "../_client";
 
@@ -107,6 +107,27 @@ export function ImportarLeads({ funis }: { funis: FunilDaLista[] }) {
               )}
             </p>
 
+            {/* O MODELO. Antes era um link minúsculo sublinhado no fim do
+                diálogo — quem não sabia que existia não via, e o usuário
+                adivinhava o formato e mandava a planilha de volta com erro.
+                Agora é um botão de verdade, logo abaixo da explicação: é o
+                primeiro passo do fluxo (baixar → preencher → subir). */}
+            <Button
+              asChild
+              variant="outline"
+              size="sm"
+              className="w-full gap-2"
+            >
+              <a
+                href="/api/v1/leads/import"
+                download="modelo-leads.csv"
+                data-testid="modelo-de-leads"
+              >
+                <DownloadSimple size={16} aria-hidden />
+                {t("Baixar planilha modelo")}
+              </a>
+            </Button>
+
             <div className="space-y-1.5">
               <Label htmlFor="funil-de-destino">{t("Funil de destino")}</Label>
               <Select value={funilId} onValueChange={setFunilId}>
@@ -143,17 +164,6 @@ export function ImportarLeads({ funis }: { funis: FunilDaLista[] }) {
               <UploadSimple size={16} aria-hidden />
               {enviando ? t("Importando…") : t("Escolher o arquivo CSV")}
             </Button>
-
-            {/* Rota de API que devolve o arquivo com `content-disposition:
-                attachment` — é download, não navegação de página. */}
-            <a
-              href="/api/v1/leads/import"
-              download="modelo-leads.csv"
-              className="block text-xs text-muted-foreground underline"
-              data-testid="modelo-de-leads"
-            >
-              {t("Baixar planilha modelo")}
-            </a>
 
             {erro ? (
               <p role="alert" className="rounded-md bg-destructive/10 p-2 text-xs font-medium text-destructive">
