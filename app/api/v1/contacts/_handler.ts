@@ -395,9 +395,17 @@ export async function createContactHandler(
   };
 
   if (input.cpf) {
-    insertRow.cpf_hash = hashCpf(input.cpf);
     const enc = await encryptCpfSql(supabase, input.cpf);
-    if (enc) insertRow.cpf_encrypted = enc;
+    // ⚠️ Só grava o hash se a cifra existir. A constraint
+    // `contacts_cpf_consistency` exige hash E cifra juntos (ou nenhum): gravar
+    // só o hash vazava dado derivado do CPF sem proteção em repouso — e
+    // quebrava o insert. A cifra `encrypt_cpf` ainda não existe no banco; até
+    // ela ser provisionada, o CPF não é armazenado (o console.warn dentro de
+    // encryptCpfSql registra o gap).
+    if (enc) {
+      insertRow.cpf_hash = hashCpf(input.cpf);
+      insertRow.cpf_encrypted = enc;
+    }
   }
 
   const { data: created, error: insErr } = await supabase

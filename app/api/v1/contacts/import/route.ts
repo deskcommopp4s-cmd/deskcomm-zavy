@@ -236,11 +236,15 @@ export async function POST(req: NextRequest): Promise<Response> {
       consent: {},
     };
     if (contato.cpf) {
-      insertRow.cpf_hash = hashCpf(contato.cpf as string);
-      // LGPD: além do hash (dedupe), grava a versão cifrada — igual ao create
-      // unitário, senão o contato importado nasce sem CPF recuperável.
       const enc = await encryptCpfSql(supabase, contato.cpf as string);
-      if (enc) insertRow.cpf_encrypted = enc;
+      // ⚠️ Só grava o hash se a cifra existir — mesma regra do handler: a
+      // constraint `contacts_cpf_consistency` exige hash E cifra juntos (ou
+      // nenhum). Sem a cifra `encrypt_cpf` (ainda não provisionada), o CPF não
+      // é armazenado em vez de quebrar a linha inteira.
+      if (enc) {
+        insertRow.cpf_hash = hashCpf(contato.cpf as string);
+        insertRow.cpf_encrypted = enc;
+      }
     }
 
     const { data: criado, error: insErr } = await supabase

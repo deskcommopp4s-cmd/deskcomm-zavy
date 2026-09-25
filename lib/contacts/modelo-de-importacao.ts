@@ -59,28 +59,33 @@ const COLUNAS = [
   "name",
   "phone_number",
   "email",
-  "cpf",
   "birthdate",
   "tags",
 ] as const;
 
 /**
- * As linhas de exemplo. A segunda tem `cpf` VAZIO de propósito: metade da
+ * As linhas de exemplo. A segunda tem `birthdate` VAZIO de propósito: metade da
  * dúvida de quem preenche é "posso deixar campo em branco?" — mostrar uma
  * linha com um campo em branco responde isso melhor que qualquer frase.
  *
+ * ⚠️ CPF NÃO ESTÁ AQUI — e é de propósito. O armazenamento do CPF exige a
+ * cifra `encrypt_cpf` (RPC pgcrypto) que NUNCA foi provisionada no banco; sem
+ * ela, a constraint `contacts_cpf_consistency` recusa o insert (hash sem
+ * cifra). Oferecer a coluna no modelo ensinaria o usuário a mandar um dado que
+ * o sistema não consegue guardar — o mesmo defeito que este arquivo existe
+ * para evitar. Quando a cifra existir, a coluna volta.
+ *
  * ⚠️ OS DADOS TÊM DE PASSAR PELO VALIDADOR REAL — e um dia não passavam.
- * O CPF era `123.456.789-00` (dígitos verificadores INVÁLIDOS — o correto
- * seria `-09`) e o telefone era `+55 11 99888-7777` (com espaços e traço,
- * fora do E.164 `^\+\d{8,15}$` que o schema exige). Quem baixava o modelo,
+ * O telefone era `+55 11 99888-7777` (com espaços e traço, fora do E.164
+ * `^\+\d{8,15}$` que o schema exige). Quem baixava o modelo,
  * preenchia por cima e mandava o arquivo de volta levava "Linha 2: CPF
  * inválido" — o modelo ensinava o formato que ele mesmo recusa. O teste
  * `modelo-de-importacao.test.ts` agora passa o texto gerado pelo validador
  * real, para este comentário não envelhecer de novo.
  */
 const EXEMPLOS: readonly (readonly string[])[] = [
-  ["EXEMPLO Maria Silva", "+5511998887777", "maria.silva@exemplo.com", "529.982.247-25", "1985-03-12", `cliente${SEPARADOR_DE_TAGS}vip`],
-  ["EXEMPLO Joao Souza", "+5511912345678", "joao.souza@exemplo.com", "", "1990-07-25", "lead"],
+  ["EXEMPLO Maria Silva", "+5511998887777", "maria.silva@exemplo.com", "1985-03-12", `cliente${SEPARADOR_DE_TAGS}vip`],
+  ["EXEMPLO Joao Souza", "+5511912345678", "joao.souza@exemplo.com", "", "lead"],
 ];
 
 /** A primeira forma sugerida de cada coluna — o nome que o Excel vai mostrar. */

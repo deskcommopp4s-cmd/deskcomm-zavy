@@ -39,9 +39,12 @@ describe("o modelo passa pelo importador de verdade", () => {
     expect(mapeado.motivo, `cabeçalho recusado: ${mapeado.motivo}`).toBeNull();
     // Um modelo com coluna que o leitor não conhece ensinaria o usuário a
     // preencher algo que seria ignorado em silêncio.
+    // ⚠️ `cpf` NÃO está aqui de propósito: o armazenamento exige a cifra
+    // `encrypt_cpf` (nunca provisionada) e a constraint `contacts_cpf_consistency`
+    // recusaria o insert. Quando a cifra existir, a coluna volta — e este teste
+    // volta junto.
     expect(Object.keys(mapeado.indices).sort()).toEqual([
       "birthdate",
-      "cpf",
       "email",
       "name",
       "phone_number",
@@ -102,10 +105,10 @@ describe("o modelo passa pelo importador de verdade", () => {
 
   it("campo opcional VAZIO é aceito — o exemplo prova isso em vez de afirmar", () => {
     // Metade da dúvida de quem preenche é "posso deixar em branco?". O segundo
-    // exemplo tem `cpf` vazio justamente para responder isso sem uma frase.
+    // exemplo tem `birthdate` vazio justamente para responder isso sem uma frase.
     const { convertidas } = importarComoA(gerarModeloDeImportacao());
     const segundo = convertidas[1]!.contato;
-    expect(segundo.cpf).toBeUndefined();
+    expect(segundo.birthdate).toBeUndefined();
     expect(segundo.name).toBeTruthy();
   });
 });
@@ -120,7 +123,6 @@ describe("o modelo acompanha o catálogo de colunas", () => {
       HEADER_ALIASES["name"]![0],
       HEADER_ALIASES["phone_number"]![0],
       HEADER_ALIASES["email"]![0],
-      HEADER_ALIASES["cpf"]![0],
       HEADER_ALIASES["birthdate"]![0],
       HEADER_ALIASES["tags"]![0],
     ]);
