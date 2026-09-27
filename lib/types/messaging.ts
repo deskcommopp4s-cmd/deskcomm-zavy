@@ -71,6 +71,20 @@ export interface Message {
   media_mime: string | null;
   media_size_bytes: number | null;
   media_storage_path: string | null;
+  /**
+   * O TEXTO DERIVADO da mídia (migration 0058): transcrição do áudio, texto do
+   * documento, descrição da imagem/vídeo. O worker `media-derive-worker` grava
+   * depois que a mensagem existe — por isso chega em SEGUNDO momento, e o
+   * realtime (`event: "*"`) é o que faz a tela pegá-lo sem refresh manual.
+   *
+   * Nasceu para alimentar o AGENTE (o derivado é texto puro, então qualquer
+   * modelo o lê). A partir da entrega de acessibilidade, também é exibido ao
+   * OPERADOR no balão de áudio — quem não dispõe de áudio acompanha o
+   * atendimento lendo.
+   */
+  media_derived_text: string | null;
+  /** `ready` = derivado pronto · `failed` = desistiu após as tentativas · nulo = ainda não derivou. */
+  media_derived_status: string | null;
   // Espelha o CHECK do banco (messages_sent_via_check): 'crm', 'external_device',
   // 'automation', 'ai', 'user', 'system'. O tipo listava só três e o TypeScript
   // aceitava os demais só porque o dado vem do Supabase sem cast — a tela então

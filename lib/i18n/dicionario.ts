@@ -9001,6 +9001,14 @@ export const DICIONARIO: Traducoes = {
   "Não tem a planilha pronta? Baixe o modelo e preencha por cima dos exemplos.": {
     es: "¿No tienes la hoja lista? Descarga la plantilla y rellénala sobre los ejemplos.",
   },
+  // AudioPlayer.tsx (transcrição do áudio na tela). A funcionalidade atende quem
+  // não dispõe de áudio: sem o texto, a única saída seria pedir ao cliente para
+  // escrever de novo — passando a bola para quem não tem culpa.
+  "Ver transcrição": { es: "Ver transcripción" },
+  "Ocultar transcrição": { es: "Ocultar transcripción" },
+  "Não conseguimos transcrever este áudio.": {
+    es: "No pudimos transcribir este audio.",
+  },
 };
 
 /**

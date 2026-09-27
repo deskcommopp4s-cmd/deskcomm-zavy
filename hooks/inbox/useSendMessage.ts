@@ -61,6 +61,10 @@ export function useSendMessage() {
         media_mime: args.media_mime ?? null,
         media_size_bytes: null,
         media_storage_path: null,
+        // Mensagem otimista: o derivado (transcrição/visão) ainda não existe —
+        // quem o grava é o worker, depois que a linha real nasce.
+        media_derived_text: null,
+        media_derived_status: null,
         reply_to_message_id: args.reply_to_message_id ?? null,
         sent_via: "user",
         sent_by_user_id: null,
