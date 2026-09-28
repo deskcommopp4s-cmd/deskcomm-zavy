@@ -215,6 +215,64 @@ export async function validateDeepSeekKey(apiKey: string): Promise<ValidationRes
  * Mesma régua dos outros: 401/403 = chave errada; qualquer outro não-2xx é
  * status do provedor; o corpo é a lista de modelos.
  */
+/**
+ * Modelos do OpenCode Go que NÃO respondem pelo endpoint compatível com a OpenAI.
+ *
+ * O gateway dele serve cada modelo por um protocolo diferente, e o
+ * `GET /models` devolve TODOS — inclusive os que não atendem em
+ * `/chat/completions`. Sem este filtro, o seletor da tela ofereceria modelos que
+ * recusam a chamada, e o operador procuraria o defeito na chave dele.
+ *
+ * **Medido em 28/09/2026**, um `POST /chat/completions` com `max_tokens: 1` por
+ * modelo: dos 30 que o `/models` lista, **23 respondem 200** e estes 7 respondem
+ * `400`. Bate com a tabela de endpoints da doc oficial, que põe os Grok e os GPT
+ * Luna em `/v1/responses` e o MiniMax M2.7 em `/v1/messages` (protocolo
+ * Anthropic) — e o Muse Spark, que não aparece lá, também foi medido.
+ *
+ * A lista é datada de propósito: modelo novo entra no `/models` sozinho, e
+ * precisa ser remedido antes de aparecer na tela. O teste
+ * `tests/unit/provedor-opencode.test.ts` é quem guarda essa régua.
+ */
+export const MODELOS_OPENCODE_FORA_DO_ENDPOINT_COMPATIVEL = [
+  "gpt-5.6-luna",
+  "gpt-6-luna",
+  "grok-4.6",
+  "grok-4.7",
+  "minimax-m2.7",
+  "muse-spark-1.2-contributor",
+  "muse-spark-1.3-contributor",
+] as const;
+
+export async function validateOpenCodeKey(apiKey: string): Promise<ValidationResult> {
+  try {
+    // A LISTAGEM não exige o `x-opencode-session` — medido: responde 200 só com
+    // a chave. É por isso que a validação da credencial não precisa conhecê-lo;
+    // quem o carrega é a fábrica, na hora de gerar.
+    const res = await timedFetch("https://opencode.ai/zen/go/v1/models", {
+      method: "GET",
+      headers: { Authorization: `Bearer ${apiKey}` },
+    });
+    if (res.status === 401 || res.status === 403) {
+      return { ok: false, error: "auth_failed_401" };
+    }
+    if (!res.ok) {
+      return { ok: false, error: `provider_status_${res.status}` };
+    }
+    const json = (await res.json()) as { data?: { id: string }[] };
+    const fora = new Set<string>(MODELOS_OPENCODE_FORA_DO_ENDPOINT_COMPATIVEL);
+    const models = (json.data ?? [])
+      .map((m) => m.id)
+      .filter((id) => Boolean(id) && !fora.has(id));
+    return { ok: true, models };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (msg.includes("timed out") || msg.includes("timeout")) {
+      return { ok: false, error: "timeout" };
+    }
+    return { ok: false, error: `network: ${msg.slice(0, 120)}` };
+  }
+}
+
 export async function validateZaiKey(apiKey: string): Promise<ValidationResult> {
   try {
     const res = await timedFetch("https://api.z.ai/api/paas/v4/models", {
@@ -277,6 +335,8 @@ export function validateProviderKey(
       return validateDeepSeekKey(apiKey);
     case "zai":
       return validateZaiKey(apiKey);
+    case "opencode":
+      return validateOpenCodeKey(apiKey);
     default: {
       // Sem `never` aqui: `Provider` agora é derivado de PROVEDORES, e a lista
       // cresce sem que este arquivo saiba. Provedor novo cadastrado antes de

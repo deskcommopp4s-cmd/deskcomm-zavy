@@ -106,7 +106,6 @@ describe("ponto FIXO anuncia o que ele mesmo usa", () => {
         model_id: "gpt-5.6-sol",
         credential_id: null,
         base_url: null,
-        headers: null,
         is_enabled: true,
       },
       agentePublicado: null,

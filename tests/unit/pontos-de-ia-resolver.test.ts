@@ -34,9 +34,6 @@ const binding = (over: Partial<LinhaDeBinding> = {}): LinhaDeBinding => ({
   credential_id: "cred-openrouter",
   model_id: "meta-llama/llama-3.3-70b-instruct",
   base_url: null,
-  // Os cabeçalhos do ponto (migration 0268) são uma COLUNA da linha: a leitura
-  // sempre a traz, e nula quando o ponto não usa nenhum.
-  headers: null,
   is_enabled: true,
   ...over,
 });

@@ -103,6 +103,16 @@ export const PROVEDORES = [
     ondePegarAChave: "https://z.ai/manage-apikey/apikey-list",
     prefixoDaChave: "…",
   },
+  {
+    id: "opencode",
+    rotulo: "OpenCode Go",
+    quandoUsar:
+      "Assinatura que dá acesso a modelos abertos bons e baratos (GLM, Qwen, DeepSeek, Kimi, MiMo) por um gateway compatível com a OpenAI. O endereço e o cabeçalho de roteamento que esse gateway exige já vêm embutidos — você cola a chave e escolhe o modelo.",
+    aceitaEndpointProprio: false,
+    catalogoSincronizavel: true,
+    ondePegarAChave: "https://opencode.ai/auth",
+    prefixoDaChave: "oc_sk_…",
+  },
 ] as const satisfies readonly ProvedorSuportado[];
 // `as const satisfies` e não anotação de tipo: a anotação apagaria os literais
 // e `Provider` viraria `string`, deixando o compilador aceitar qualquer texto

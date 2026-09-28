@@ -64,12 +64,6 @@ export interface LinhaDeBinding {
   credential_id: string | null;
   model_id: string;
   base_url: string | null;
-  /**
-   * Cabeçalhos HTTP extras deste ponto (migration 0268). `null` = nenhum.
-   * Existe para provedores OpenAI-compatíveis que exigem cabeçalho de
-   * roteamento próprio — o OpenCode Go responde 400 sem `x-opencode-session`.
-   */
-  headers: Record<string, string> | null;
   is_enabled: boolean;
 }
 
@@ -100,14 +94,6 @@ export interface DecisaoDeBinding {
   modelId: string | null;
   credentialId: string | null;
   baseUrl: string | null;
-  /**
-   * Cabeçalhos extras do ponto, quando o binding tem (migration 0268).
-   * OPCIONAL de propósito: só o binding carrega cabeçalhos; os degraus de
-   * padrão da organização, agente publicado e ambiente não têm de onde tirá-los,
-   * e obrigá-los a declarar `headers: null` seria ruído em cinco `return`.
-   * Ausente e `null` significam a mesma coisa: nenhum cabeçalho extra.
-   */
-  headers?: Record<string, string> | null;
   origem: OrigemDaEscolha;
   /**
    * Incoerências que NÃO impedem a chamada, mas que alguém precisa ver. A
@@ -205,7 +191,6 @@ export function decidirBinding(entrada: EntradaDaDecisao): DecisaoDeBinding {
         modelId: entrada.binding.model_id,
         credentialId: entrada.binding.credential_id,
         baseUrl: entrada.binding.base_url,
-        headers: entrada.binding.headers,
         origem: "binding",
         avisos,
       };
@@ -265,7 +250,6 @@ export function decidirBinding(entrada: EntradaDaDecisao): DecisaoDeBinding {
       modelId: entrada.binding.model_id,
       credentialId: entrada.binding.credential_id,
       baseUrl: entrada.binding.base_url,
-      headers: entrada.binding.headers,
       origem: "binding",
       avisos,
     };

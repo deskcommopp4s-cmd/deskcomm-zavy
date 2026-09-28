@@ -209,6 +209,12 @@ type EntradaDeMarca = {
 
 const MARCA_CONGELADA: Record<string, EntradaDeMarca> = {
   // ─── PROTOCOLO — contrato de fio. Renomear quebra integração alheia. ───
+  "lib/agent-engine/edge/llm/providers.ts": {
+    categoria: "PROTOCOLO",
+    motivo:
+      "prefixo do `x-opencode-session` que o gateway do OpenCode Go exige em toda geração (sem ele: 400 MissingSessionID). É identificador de sessão que SAI do processo para um terceiro — não é marca visível ao usuário, e renomeá-lo não muda nada para o cliente; o que ele não pode é deixar de ser estável, porque é o que o provedor usa para rotear e cachear prefixo.",
+    marcas: ["deskcomm"],
+  },
   "app/api/v1/webhooks/in/[token]/route.ts": {
     categoria: "PROTOCOLO",
     motivo:
@@ -835,6 +841,11 @@ const HOSTS_DECLARADOS: Record<string, EntradaDeHost> = {
     categoria: "FORNECEDOR",
     motivo:
       "endpoint da API da Z.ai (GLM, OpenAI-compatível) no registry de produção, no catálogo de provedores, no validador de chave e na prova de crédito. É o destino do request, não texto de interface; trocar pelo domínio do revendedor faria a chamada não chegar.",
+  },
+  "opencode.ai": {
+    categoria: "FORNECEDOR",
+    motivo:
+      "endpoint do OpenCode Go (gateway de modelos abertos) no registry de produção, no catálogo de provedores, no validador de chave e na prova de crédito. É o destino do request, não texto de interface; trocar pelo domínio do revendedor faria a chamada não chegar.",
   },
   "z.ai": {
     categoria: "CONSOLE",

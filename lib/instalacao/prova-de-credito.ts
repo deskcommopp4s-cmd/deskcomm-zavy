@@ -21,7 +21,9 @@
 import { normalizarErro } from "@/lib/agent-engine/edge/llm/run-model-call";
 import {
   cabecalhosDeAtribuicaoOpenRouter,
+  cabecalhosDoOpenCode,
   DEEPSEEK_ENDPOINT,
+  OPENCODE_ENDPOINT,
   OPENROUTER_ENDPOINT,
   ZAI_ENDPOINT,
 } from "@/lib/agent-engine/edge/llm/providers";
@@ -120,6 +122,20 @@ function montarRequisicaoBase(
           generationConfig: { maxOutputTokens: 1 },
         },
       };
+    case "opencode":
+      // OpenCode Go: a prova precisa do `x-opencode-session`, e não é detalhe —
+      // sem ele o gateway recusa com 400 `MissingSessionID` e o botão "Testar"
+      // diria "não respondeu" sobre uma chave que está perfeita, mandando o
+      // operador procurar o defeito na credencial.
+      return {
+        url: `${OPENCODE_ENDPOINT}/chat/completions`,
+        headers: {
+          authorization: `Bearer ${apiKey}`,
+          "content-type": "application/json",
+          ...cabecalhosDoOpenCode(apiKey),
+        },
+        body: { model: modelo, max_tokens: 1, messages: msg },
+      };
     default:
       // Fail-closed: provedor que este módulo não sabe cobrar não recebe um
       // "ok" por omissão — seria a frase tranquilizadora de novo.
@@ -128,29 +144,21 @@ function montarRequisicaoBase(
 }
 
 /**
- * A requisição de prova, com os cabeçalhos do PONTO por cima.
+ * A requisição de prova.
  *
- * Eles entram por último porque são escolha explícita do operador — e há
- * provedor OpenAI-compatível que só responde com o cabeçalho de roteamento dele
- * (medido no OpenCode Go: 400 `MissingSessionID` sem `x-opencode-session`). Um
- * botão "Testar" que ignora o cabeçalho reprovaria uma configuração que
- * funciona, e o operador iria procurar o defeito onde ele não está.
- *
- * O `Authorization` já veio montado acima, e a rota de gravação RECUSA que o
- * operador o sobrescreva — então não há caminho em que este merge troque a
- * autenticação.
+ * O `x-opencode-session` do OpenCode Go entra no ramo DELE, logo acima, e não
+ * por um parâmetro de cabeçalhos vindo de fora: o provedor nasce sabendo o que
+ * precisa, e o operador só cola a chave. (Uma versão anterior desta função
+ * aceitava cabeçalhos do painel; eles saíram junto com a coluna que os guardava
+ * — ninguém os usou, e o que o OpenCode exige não é configuração do cliente.)
  */
 export function montarRequisicaoDeProva(
   provider: string,
   apiKey: string,
   modelo: string,
   baseUrl?: string,
-  headers?: Record<string, string> | null,
 ): Requisicao | null {
-  const base = montarRequisicaoBase(provider, apiKey, modelo, baseUrl);
-  if (!base) return null;
-  if (!headers || Object.keys(headers).length === 0) return base;
-  return { ...base, headers: { ...base.headers, ...headers } };
+  return montarRequisicaoBase(provider, apiKey, modelo, baseUrl);
 }
 
 /** Traduz a resposta HTTP no mesmo vocabulário de erro do runtime. */
@@ -175,9 +183,9 @@ export async function provarSaldo(
   provider: string,
   apiKey: string,
   modelo: string,
-  opcoes?: { baseUrl?: string; headers?: Record<string, string> | null; fetchImpl?: typeof fetch },
+  opcoes?: { baseUrl?: string; fetchImpl?: typeof fetch },
 ): Promise<ResultadoDaProva> {
-  const req = montarRequisicaoDeProva(provider, apiKey, modelo, opcoes?.baseUrl, opcoes?.headers);
+  const req = montarRequisicaoDeProva(provider, apiKey, modelo, opcoes?.baseUrl);
   if (!req) {
     return {
       ok: false,

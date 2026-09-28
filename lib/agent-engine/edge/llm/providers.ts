@@ -8,6 +8,7 @@ import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import { createOpenAI } from '@ai-sdk/openai';
 import type { LanguageModel } from 'ai';
 import { MockLanguageModelV3 } from 'ai/test';
+import { createHash } from 'node:crypto';
 
 import { allowlistedFetch, buildAllowlist } from '../egress';
 
@@ -35,24 +36,8 @@ import { allowlistedFetch, buildAllowlist } from '../egress';
  */
 export type ProviderRegistry = Record<
   string,
-  (
-    apiKey: string,
-    modelId: string,
-    baseUrl?: string,
-    headers?: Record<string, string> | null,
-  ) => LanguageModel
+  (apiKey: string, modelId: string, baseUrl?: string) => LanguageModel
 >;
-
-/**
- * Só devolve `headers` quando há algum — passar `{}` não muda nada, mas um
- * campo vazio no objeto do SDK é ruído em log e em rastro de erro.
- */
-function cabecalhosDoPonto(
-  headers: Record<string, string> | null | undefined,
-): { headers: Record<string, string> } | Record<string, never> {
-  if (!headers || Object.keys(headers).length === 0) return {};
-  return { headers };
-}
 
 /**
  * Endpoint canônico do provider Anthropic (baseURL default do @ai-sdk/anthropic). NÃO é
@@ -92,6 +77,41 @@ export const OPENROUTER_ENDPOINT = 'https://openrouter.ai/api/v1';
 export const DEEPSEEK_ENDPOINT = 'https://api.deepseek.com';
 /** Z.ai (GLM) — OpenAI-compatível; a raiz documentada é `/api/paas/v4`. */
 export const ZAI_ENDPOINT = 'https://api.z.ai/api/paas/v4';
+
+/**
+ * Endpoint do OpenCode Go (assinatura que dá acesso a modelos abertos — GLM,
+ * Qwen, DeepSeek, Kimi, MiMo). OpenAI-compatível, mas com uma exigência própria:
+ * **toda geração precisa do cabeçalho `x-opencode-session`**.
+ *
+ * Medido no endpoint, em 28/09/2026: `POST /chat/completions` sem o cabeçalho
+ * devolve `400 {"type":"error","error":{"type":"MissingSessionID"}}`; com ele,
+ * 200. A listagem (`GET /models`) NÃO exige — responde 200 só com a chave.
+ *
+ * A doc do provedor diz por que: "Send a stable session ID in
+ * `x-opencode-session` for each conversation so we can optimize routing and
+ * prompt caching." O cabeçalho é de ROTEAMENTO INTERNO do gateway — não é
+ * configuração do cliente, e é por isso que ele não aparece na tela: o operador
+ * cola a chave e escolhe o modelo, como em qualquer provedor.
+ */
+export const OPENCODE_ENDPOINT = 'https://opencode.ai/zen/go/v1';
+
+/**
+ * O `x-opencode-session` do OpenCode Go, derivado da própria chave.
+ *
+ * O provedor pede "um id de sessão ESTÁVEL por conversa". O ideal seria o id da
+ * conversa do CRM; a fábrica não o recebe (o `run-model-call` monta o modelo sem
+ * esse dado), e inventar um valor NOVO a cada chamada seria o pior dos mundos —
+ * cada turno cairia numa rota diferente e o cache de prefixo nunca acertaria.
+ *
+ * Derivar da chave dá o que a doc pede em essência: um id **estável**, único do
+ * espaço de trabalho (uma chave = uma assinatura), e que não muda entre
+ * processos. O hash é irreversível de propósito — o cabeçalho viaja para o log
+ * de terceiro, e não é lugar para fragmento de chave.
+ */
+export function cabecalhosDoOpenCode(apiKey: string): Record<string, string> {
+  const digest = createHash('sha256').update(apiKey).digest('hex').slice(0, 32);
+  return { 'x-opencode-session': `deskcomm-${digest}` };
+}
 
 /**
  * Cabeçalhos OPCIONAIS de atribuição da OpenRouter.
@@ -215,10 +235,9 @@ export function createDefaultRegistry(opts?: {
     };
   };
   return {
-    anthropic: (apiKey, modelId, _baseUrl, headers) =>
+    anthropic: (apiKey, modelId) =>
       createAnthropic({
         apiKey,
-        ...cabecalhosDoPonto(headers),
         fetch: contain(ANTHROPIC_ENDPOINT),
       })(modelId),
     /**
@@ -235,19 +254,17 @@ export function createDefaultRegistry(opts?: {
      * de "modelo local" (gateway OpenAI-compatível no host do cliente) vira
      * configuração de tela em vez de código.
      */
-    openai: (apiKey, modelId, baseUrl, headers) => {
+    openai: (apiKey, modelId, baseUrl) => {
       const endpoint = baseUrl ?? OPENAI_ENDPOINT;
       return createOpenAI({
         apiKey,
         baseURL: endpoint,
-        ...cabecalhosDoPonto(headers),
         fetch: contain(endpoint),
       })(modelId);
     },
-    google: (apiKey, modelId, _baseUrl, headers) =>
+    google: (apiKey, modelId) =>
       createGoogleGenerativeAI({
         apiKey,
-        ...cabecalhosDoPonto(headers),
         fetch: contain(GOOGLE_ENDPOINT),
       })(modelId),
     /**
@@ -257,7 +274,7 @@ export function createDefaultRegistry(opts?: {
      * endpoint canônico faria o egress bloquear a própria configuração que a
      * tela ofereceu, com erro de rede que ninguém liga ao painel.
      */
-    openrouter: (apiKey, modelId, baseUrl, headers) => {
+    openrouter: (apiKey, modelId, baseUrl) => {
       const endpoint = baseUrl ?? OPENROUTER_ENDPOINT;
       return createOpenAI({
         apiKey,
@@ -265,7 +282,7 @@ export function createDefaultRegistry(opts?: {
         // Atribuição da OpenRouter + cabeçalhos do PONTO. O do ponto vem depois
         // de propósito: é escolha explícita do operador e deve poder sobrepor —
         // a rota recusa `Authorization`, então a chave nunca é sobreposta.
-        ...cabecalhosDoPonto({ ...cabecalhosDeAtribuicaoOpenRouter(), ...(headers ?? {}) }),
+        headers: cabecalhosDeAtribuicaoOpenRouter(),
         fetch: contain(endpoint),
       })(modelId);
     },
@@ -275,7 +292,7 @@ export function createDefaultRegistry(opts?: {
      * gateway, e a allowlist do egress precisa ser a DELE — fixá-la no endpoint
      * canônico bloquearia a configuração que a própria tela permitiu.
      */
-    deepseek: (apiKey, modelId, baseUrl, headers) => {
+    deepseek: (apiKey, modelId, baseUrl) => {
       const endpoint = baseUrl ?? DEEPSEEK_ENDPOINT;
       const contido = contain(endpoint);
       const fetchFinal =
@@ -283,7 +300,6 @@ export function createDefaultRegistry(opts?: {
       return createOpenAI({
         apiKey,
         baseURL: endpoint,
-        ...cabecalhosDoPonto(headers),
         fetch: fetchFinal,
       })(modelId);
     },
@@ -292,15 +308,31 @@ export function createDefaultRegistry(opts?: {
      * razão da OpenRouter/DeepSeek: o painel oferece apontar para um gateway, e
      * a allowlist do egress precisa ser a DELE.
      */
-    zai: (apiKey, modelId, baseUrl, headers) => {
+    zai: (apiKey, modelId, baseUrl) => {
       const endpoint = baseUrl ?? ZAI_ENDPOINT;
       return createOpenAI({
         apiKey,
         baseURL: endpoint,
-        ...cabecalhosDoPonto(headers),
         fetch: contain(endpoint),
       })(modelId);
     },
+    /**
+     * OpenCode Go. O `base_url` do painel não se aplica (o endereço é o do
+     * gateway dele), mas o 4º parâmetro fica na assinatura para o registry ser
+     * homogêneo — e o `x-opencode-session` entra SEMPRE, porque sem ele a
+     * geração é recusada com 400 (medido).
+     *
+     * Aqui está a diferença de desenho em relação a um campo de cabeçalho na
+     * tela: o provedor nasce sabendo o que precisa, e o operador só cola a
+     * chave e escolhe o modelo.
+     */
+    opencode: (apiKey, modelId) =>
+      createOpenAI({
+        apiKey,
+        baseURL: OPENCODE_ENDPOINT,
+        headers: cabecalhosDoOpenCode(apiKey),
+        fetch: contain(OPENCODE_ENDPOINT),
+      })(modelId),
   };
 }
 
