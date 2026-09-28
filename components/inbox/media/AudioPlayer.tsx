@@ -176,10 +176,16 @@ export function AudioPlayer({ messageId, isOutbound, derivedText, derivedStatus 
             aria-expanded={verTranscricao}
             data-testid={`transcricao-toggle-${messageId}`}
             className={cn(
-              "w-fit rounded text-[11px] font-medium underline underline-offset-2 transition-colors",
-              isOutbound
-                ? "text-primary-foreground/80 hover:text-primary-foreground"
-                : "text-primary hover:text-primary/80",
+              // `rounded-md`, e não `rounded`: no Tailwind 4 o `rounded` puro é
+              // 0.25rem e não o `--radius-md` do produto — o botão mudaria de
+              // canto sozinho na migração.
+              //
+              // E o realce do hover é o SUBLINHADO, não o alpha do texto. O alpha
+              // (`/80`) não pintava no v3 e passa a pintar no v4: em `--color-primary`
+              // sobre `--color-surface-elevated` ele cai a 3.49:1, abaixo do 4.5:1
+              // que a régua exige. Sem o alpha é o que a produção JÁ mostrava.
+              "w-fit rounded-md text-[11px] font-medium underline underline-offset-2 transition-colors hover:no-underline",
+              isOutbound ? "text-primary-foreground" : "text-primary",
             )}
           >
             {verTranscricao ? t("Ocultar transcrição") : t("Ver transcrição")}
@@ -188,7 +194,7 @@ export function AudioPlayer({ messageId, isOutbound, derivedText, derivedStatus 
             <p
               data-testid={`transcricao-${messageId}`}
               className={cn(
-                "max-h-48 overflow-y-auto whitespace-pre-wrap break-words rounded p-2 text-xs",
+                "max-h-48 overflow-y-auto whitespace-pre-wrap break-words rounded-md p-2 text-xs",
                 isOutbound
                   ? "bg-primary-foreground/15 text-primary-foreground"
                   : "bg-background/60 text-foreground",
@@ -208,7 +214,9 @@ export function AudioPlayer({ messageId, isOutbound, derivedText, derivedStatus 
           data-testid={`transcricao-falhou-${messageId}`}
           className={cn(
             "text-[11px]",
-            isOutbound ? "text-primary-foreground/70" : "text-muted-foreground",
+            // Sem o alpha: em `--color-primary` o `/70` pinta 3.78:1 no v4, abaixo
+            // do 4.5:1. Sem ele, 5.80:1 — e é o que a produção já mostra.
+            isOutbound ? "text-primary-foreground" : "text-muted-foreground",
           )}
         >
           {t("Não conseguimos transcrever este áudio.")}

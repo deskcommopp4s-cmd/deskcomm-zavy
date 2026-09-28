@@ -137,6 +137,17 @@ const GATILHO_ESPERADO: Record<string, { condicao: string | null; efeito: string
       "protection lê como satisfeito.",
   },
 
+  "publish-image.yml::limpar-versoes-ghcr": {
+    condicao: "github.event_name != 'pull_request'",
+    efeito:
+      "A poda das versões untagged do GHCR. Existe porque a quota de storage do plano free " +
+      "estourou (~50 GB) e o publish passou a falhar — o job é a contenção disso. Desligá-lo " +
+      "(`skipped`) não quebra deploy nenhum HOJE: quebra o de amanhã, quando a quota fechar " +
+      "de novo, e sem sinal até lá. O `if:` pelo evento (e não `always()`) é de propósito: " +
+      "num pull request não há imagem publicada para podar, e ele só precisa rodar depois de " +
+      "`imagens-ok`.",
+  },
+
   // --- os outros checks obrigatórios ------------------------------------------
   // Mesmo mecanismo, mesmo desfecho: `skipped` conta como check satisfeito.
   // Desligar qualquer um destes faz o PR entrar sem ter sido testado.

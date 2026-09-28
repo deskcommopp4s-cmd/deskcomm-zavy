@@ -831,6 +831,16 @@ const HOSTS_DECLARADOS: Record<string, EntradaDeHost> = {
     motivo:
       "endpoint da API da DeepSeek (OpenAI-compatível) no registry de produção, no runtime de ensaio, no validador de chave e na prova de crédito. É o destino do request, não texto de interface; trocar pelo domínio do revendedor faria a chamada não chegar.",
   },
+  "api.z.ai": {
+    categoria: "FORNECEDOR",
+    motivo:
+      "endpoint da API da Z.ai (GLM, OpenAI-compatível) no registry de produção, no catálogo de provedores, no validador de chave e na prova de crédito. É o destino do request, não texto de interface; trocar pelo domínio do revendedor faria a chamada não chegar.",
+  },
+  "z.ai": {
+    categoria: "CONSOLE",
+    motivo:
+      "painel onde o operador busca a chave da Z.ai (`ondePegarAChave` em lib/ai/pontos/provedores.ts). Aparece como link na tela de Credenciais — é texto de interface, mas o endereço é do fornecedor e não há equivalente nosso: a credencial só existe lá.",
+  },
   "api.typesafe.ai": {
     categoria: "FORNECEDOR",
     motivo:
@@ -1102,6 +1112,13 @@ describe("catraca de host de terceiro no código que embarca", () => {
       // enxergá-lo, e não porque o produto ganhou host novo.
       "s.whatsapp.net",
       "tusitio.com",
+      // Decisão escrita, como esta lista cobra: `z.ai` não é destino de chamada
+      // (o código fala com `api.z.ai`, declarado como FORNECEDOR) — é o painel
+      // onde o operador pega a chave da Z.ai, o `ondePegarAChave` do catálogo de
+      // provedores. Mesma natureza de `console.anthropic.com` e
+      // `platform.deepseek.com`: a credencial só existe lá, e não há equivalente
+      // nosso que o link possa apontar.
+      "z.ai",
     ]);
   });
 
