@@ -3,6 +3,7 @@ import type { NextRequest } from "next/server";
 import { z } from "zod";
 
 import { fail, ok } from "@/lib/api/wrappers";
+import { cabecalhosDoPontoSchema } from "@/lib/ai/cabecalhos-do-ponto";
 import { requireRole } from "@/lib/auth/require-role";
 import { byteaToBuffer, decryptKey } from "@/lib/crypto/aes_gcm";
 import { traduzir } from "@/lib/i18n/dicionario";
@@ -53,6 +54,12 @@ const entradaSchema = z.object({
   model_id: z.string().min(1),
   credential_id: z.string().uuid().nullable(),
   base_url: z.string().url().nullable(),
+  /**
+   * Opcional de propósito: esta rota é mais antiga que a coluna, e uma aba
+   * aberta com o painel anterior não deve passar a dar 400 por não mandar um
+   * campo que ela nem conhece.
+   */
+  headers: cabecalhosDoPontoSchema,
 });
 
 export async function POST(req: NextRequest): Promise<Response> {
@@ -68,7 +75,7 @@ export async function POST(req: NextRequest): Promise<Response> {
   if (!parsed.success) {
     return fail("validation_failed", t("Configuração inválida para o teste."), 422, { requestId });
   }
-  const { provider, model_id, credential_id, base_url } = parsed.data;
+  const { provider, model_id, credential_id, base_url, headers } = parsed.data;
 
   if (credential_id === null) {
     // Sem chave não há o que provar. A mensagem diz o PRÓXIMO PASSO em vez de
@@ -129,6 +136,9 @@ export async function POST(req: NextRequest): Promise<Response> {
 
   const resultado = await provarSaldo(provider, apiKey, model_id, {
     baseUrl: base_url ?? undefined,
+    // O botão prova o que está NA TELA, cabeçalho incluído: ignorá-lo daria um
+    // veredito sobre uma configuração que o operador não vai usar.
+    headers: headers ?? null,
   });
 
   return ok(resultado, { requestId });

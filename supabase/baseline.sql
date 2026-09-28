@@ -11074,6 +11074,24 @@ alter table public.ai_purpose_bindings
   foreign key (credential_id) references public.ai_provider_credentials(id)
   on delete set null;
 
+-- (migration 0268) Cabeçalhos HTTP próprios do ponto.
+--
+-- O endereço próprio resolveu "apontar para outro endpoint"; alguns provedores
+-- OpenAI-compatíveis exigem também um CABEÇALHO de roteamento. Medido no
+-- OpenCode Go: sem `x-opencode-session` a resposta é 400 MissingSessionID, e
+-- com ele é 200. Sem esta coluna o painel salva a configuração e toda chamada
+-- falha com um erro que não aponta para o painel.
+--
+-- Guarda cabeçalhos, não credenciais: a chave continua no cofre cifrado, e a
+-- rota RECUSA `Authorization` para o operador não sobrescrever a autenticação.
+alter table public.ai_purpose_bindings
+  add column if not exists headers jsonb;
+comment on column public.ai_purpose_bindings.headers is
+  'Cabeçalhos HTTP extras enviados ao provedor DESTE ponto ({ "Nome": "valor" }). '
+  'Nulo = nenhum. Existe para provedores que exigem cabeçalho de roteamento '
+  '(ex.: x-opencode-session do OpenCode Go, cuja ausência responde 400). '
+  'Authorization é recusado pela rota: a chave vive em ai_provider_credentials.';
+
 alter table public.ai_purpose_bindings enable row level security;
 
 drop policy if exists tenant_isolation_ai_purpose_bindings_all on public.ai_purpose_bindings;

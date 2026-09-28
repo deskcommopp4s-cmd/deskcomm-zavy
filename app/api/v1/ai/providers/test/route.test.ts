@@ -129,16 +129,48 @@ describe("testar a configuração de um ponto de IA", () => {
       "openai",
       "sk-da-org-que-nao-pode-vazar",
       "gpt-5-mini",
-      { baseUrl: "https://gateway.ejemplo.com/v1" },
+      { baseUrl: "https://gateway.ejemplo.com/v1", headers: null },
     );
     expect(decryptKey).toHaveBeenCalled();
     expect(byteaToBuffer).toHaveBeenCalled();
+  });
+
+  it("repassa os CABEÇALHOS do ponto — o teste é sobre o par (endereço + cabeçalho)", async () => {
+    // Há gateway OpenAI-compatível que só responde com o cabeçalho de roteamento
+    // dele (medido no OpenCode Go: 400 MissingSessionID sem `x-opencode-session`).
+    // Um botão que ignorasse o cabeçalho reprovaria uma configuração que funciona.
+    await POST(
+      req(
+        corpo({
+          base_url: "https://gateway.ejemplo.com/v1",
+          headers: { "x-opencode-session": "abc123" },
+        }),
+      ),
+    );
+    expect(provarSaldo).toHaveBeenCalledWith(
+      "openai",
+      "sk-da-org-que-nao-pode-vazar",
+      "gpt-5-mini",
+      {
+        baseUrl: "https://gateway.ejemplo.com/v1",
+        headers: { "x-opencode-session": "abc123" },
+      },
+    );
+  });
+
+  it("RECUSA `Authorization` no cabeçalho — a chave vive no cofre cifrado", async () => {
+    const res = await POST(
+      req(corpo({ base_url: null, headers: { authorization: "Bearer chave-em-texto" } })),
+    );
+    expect(res.status).toBe(422);
+    expect(provarSaldo).not.toHaveBeenCalled();
   });
 
   it("sem endereço próprio, a prova usa o padrão do provedor (undefined, não string vazia)", async () => {
     await POST(req(corpo({ base_url: null })));
     expect(provarSaldo).toHaveBeenCalledWith("openai", expect.any(String), "gpt-5-mini", {
       baseUrl: undefined,
+      headers: null,
     });
   });
 

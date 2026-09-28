@@ -46,7 +46,7 @@ interface Requisicao {
  * A menor geração possível em cada provedor. `max_tokens: 1` porque o objetivo
  * é atravessar a cobrança, não obter texto.
  */
-export function montarRequisicaoDeProva(
+function montarRequisicaoBase(
   provider: string,
   apiKey: string,
   modelo: string,
@@ -127,6 +127,32 @@ export function montarRequisicaoDeProva(
   }
 }
 
+/**
+ * A requisição de prova, com os cabeçalhos do PONTO por cima.
+ *
+ * Eles entram por último porque são escolha explícita do operador — e há
+ * provedor OpenAI-compatível que só responde com o cabeçalho de roteamento dele
+ * (medido no OpenCode Go: 400 `MissingSessionID` sem `x-opencode-session`). Um
+ * botão "Testar" que ignora o cabeçalho reprovaria uma configuração que
+ * funciona, e o operador iria procurar o defeito onde ele não está.
+ *
+ * O `Authorization` já veio montado acima, e a rota de gravação RECUSA que o
+ * operador o sobrescreva — então não há caminho em que este merge troque a
+ * autenticação.
+ */
+export function montarRequisicaoDeProva(
+  provider: string,
+  apiKey: string,
+  modelo: string,
+  baseUrl?: string,
+  headers?: Record<string, string> | null,
+): Requisicao | null {
+  const base = montarRequisicaoBase(provider, apiKey, modelo, baseUrl);
+  if (!base) return null;
+  if (!headers || Object.keys(headers).length === 0) return base;
+  return { ...base, headers: { ...base.headers, ...headers } };
+}
+
 /** Traduz a resposta HTTP no mesmo vocabulário de erro do runtime. */
 export function classificarResposta(status: number, corpo: string): ResultadoDaProva {
   if (status >= 200 && status < 300) return { ok: true };
@@ -149,9 +175,9 @@ export async function provarSaldo(
   provider: string,
   apiKey: string,
   modelo: string,
-  opcoes?: { baseUrl?: string; fetchImpl?: typeof fetch },
+  opcoes?: { baseUrl?: string; headers?: Record<string, string> | null; fetchImpl?: typeof fetch },
 ): Promise<ResultadoDaProva> {
-  const req = montarRequisicaoDeProva(provider, apiKey, modelo, opcoes?.baseUrl);
+  const req = montarRequisicaoDeProva(provider, apiKey, modelo, opcoes?.baseUrl, opcoes?.headers);
   if (!req) {
     return {
       ok: false,

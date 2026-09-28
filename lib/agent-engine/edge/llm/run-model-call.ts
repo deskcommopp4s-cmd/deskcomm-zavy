@@ -497,7 +497,13 @@ export async function runModelCall(db: pg.Pool, cfg: LlmEdgeConfig, input: RunMo
       // `decisao.baseUrl` só é preenchido quando o painel apontou um endpoint
       // (gateway OpenAI-compatível, ou modelo local). Providers canônicos
       // ignoram o terceiro argumento e vão ao endpoint intrínseco.
-      model: factory(config.apiKey, model, decisao.baseUrl ?? undefined),
+      //
+      // `decisao.headers` viaja junto e é o PAR do endereço: há provedor
+      // OpenAI-compatível que só responde com o cabeçalho dele (o OpenCode Go
+      // devolve 400 MissingSessionID sem `x-opencode-session`). Sem repassar, o
+      // painel salvaria o cabeçalho e a chamada falharia por um motivo que não
+      // aponta para o painel.
+      model: factory(config.apiKey, model, decisao.baseUrl ?? undefined, decisao.headers ?? null),
       system: prefix.system,
       messages: input.messages,
       tools: toolsFinais,
