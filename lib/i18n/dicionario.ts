@@ -2060,6 +2060,14 @@ export const DICIONARIO: Traducoes = {
   "Conversas encaminhadas": { es: "Conversaciones encaminadas" },
   "Custo da IA no período": { es: "Costo de la IA en el período" },
   "Custo no período": { es: "Costo en el período" },
+  "Cabeçalho sem formato `Nome: valor`:": {
+    es: "Encabezado sin formato `Nombre: valor`:",
+  },
+  "Cabeçalhos extras (opcional)": { es: "Encabezados extra (opcional)" },
+  "Um por linha, no formato Nome: valor. Para provedores que exigem cabeçalho próprio para rotear a chamada (ex.: x-opencode-session). O Authorization não se define aqui: a chave fica em Credenciais.":
+    {
+      es: "Uno por línea, en el formato Nombre: valor. Para proveedores que exigen un encabezado propio para enrutar la llamada (ej.: x-opencode-session). El Authorization no se define aquí: la clave está en Credenciales.",
+    },
   "Deixe em branco para usar o endereço oficial do provedor. Use isto para apontar para um gateway compatível com a API da OpenAI — inclusive um modelo rodando na sua própria máquina.": {
     es: "Déjalo en blanco para usar la dirección oficial del proveedor. Usa esto para apuntar a un gateway compatible con la API de OpenAI — incluso un modelo corriendo en tu propia máquina.",
   },

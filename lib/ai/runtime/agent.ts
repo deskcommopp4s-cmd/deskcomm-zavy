@@ -31,11 +31,9 @@ import { generateText, stepCountIs, type LanguageModel, type StopCondition, type
 // Repetir a URL aqui criaria dois lugares para consertar quando ela mudar.
 import {
   cabecalhosDeAtribuicaoOpenRouter,
-  cabecalhosDoOpenCode,
   comRaciocinioDesligado,
   DEEPSEEK_ENDPOINT,
   normalizarRaciocinioDeepseek,
-  OPENCODE_ENDPOINT,
   OPENROUTER_ENDPOINT,
   type RaciocinioDeepseek,
   ZAI_ENDPOINT,
@@ -228,16 +226,6 @@ export function buildModel(
     // Z.ai (GLM) — OpenAI-compatível, mesma fábrica do registry de produção.
     case "zai":
       return createOpenAI({ apiKey, baseURL: ZAI_ENDPOINT })(modelId);
-    // OpenCode Go — OpenAI-compatível, mas o gateway dele RECUSA a geração sem
-    // o `x-opencode-session` (400 `MissingSessionID`, medido). O cabeçalho sai
-    // do mesmo helper do registry de produção: duas cópias da regra divergiriam
-    // e este caminho voltaria a dar 400 sozinho.
-    case "opencode":
-      return createOpenAI({
-        apiKey,
-        baseURL: OPENCODE_ENDPOINT,
-        headers: cabecalhosDoOpenCode(apiKey),
-      })(modelId);
     default:
       throw new Error(`unsupported_provider: ${provider}`);
   }

@@ -15,7 +15,6 @@ describe("createDefaultRegistry", () => {
       "deepseek",
       "google",
       "openai",
-      "opencode",
       "openrouter",
       "zai",
     ]);
