@@ -33,7 +33,6 @@ import {
   ehProvedorDeDecisao,
   PROVEDORES_DE_DECISAO,
 } from "@/lib/ai/pontos/provedores-de-decisao";
-import { cabecalhosDoPontoSchema } from "@/lib/ai/cabecalhos-do-ponto";
 import { validarBinding } from "@/lib/ai/pontos/validar-binding";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
@@ -63,7 +62,7 @@ export async function GET(): Promise<Response> {
   const [bindingsRes, credsRes, modelosRes, orgRes, agenteRes] = await Promise.all([
     db
       .from("ai_purpose_bindings")
-      .select("purpose, provider, credential_id, model_id, base_url, headers, is_enabled")
+      .select("purpose, provider, credential_id, model_id, base_url, is_enabled")
       .eq("organization_id", org.orgId),
     db
       .from("ai_provider_credentials")
@@ -174,10 +173,6 @@ export async function GET(): Promise<Response> {
         modelId: decisao.modelId,
         credentialId: decisao.credentialId,
         baseUrl: decisao.baseUrl,
-        // Os cabeçalhos do ponto, para a tela poder MOSTRAR o que está gravado —
-        // campo que não recebe o valor atual faz o operador reconfigurar às
-        // cegas e, sem querer, apagar o que já estava lá.
-        headers: decisao.headers ?? null,
         origem: decisao.origem,
         porQue: EXPLICACAO_DA_ORIGEM[decisao.origem],
       },
@@ -235,8 +230,6 @@ const corpoDoPut = z.object({
   model_id: z.string().min(1),
   credential_id: z.string().uuid().nullable().optional(),
   base_url: z.string().url().nullable().optional(),
-  /** Cabeçalhos HTTP extras deste ponto — a regra vive em `cabecalhos-do-ponto.ts`. */
-  headers: cabecalhosDoPontoSchema,
   is_enabled: z.boolean().optional(),
 });
 
@@ -321,12 +314,11 @@ export async function PUT(req: NextRequest): Promise<Response> {
         model_id: corpo.model_id,
         credential_id: corpo.credential_id ?? null,
         base_url: corpo.base_url ?? null,
-        headers: corpo.headers ?? null,
         is_enabled: corpo.is_enabled ?? true,
       },
       { onConflict: "organization_id,purpose" },
     )
-    .select("id, purpose, provider, model_id, credential_id, base_url, headers, is_enabled")
+    .select("id, purpose, provider, model_id, credential_id, base_url, is_enabled")
     .maybeSingle();
 
   if (error) return fail("save_failed", error.message, 500);

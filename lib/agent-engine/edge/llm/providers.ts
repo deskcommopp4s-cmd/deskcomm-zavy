@@ -12,47 +12,20 @@ import { MockLanguageModelV3 } from 'ai/test';
 import { allowlistedFetch, buildAllowlist } from '../egress';
 
 /**
- * provider name → (chave BYOK da org, id do modelo, endpoint opcional,
- * cabeçalhos opcionais) → modelo pronto para generateText.
+ * provider name → (chave BYOK da org, id do modelo, endpoint opcional) → modelo
+ * pronto para generateText.
  *
- * O terceiro e o quarto parâmetros vêm do BINDING do ponto (painel de
- * provedores) e são o par que faz "apontar para outro endpoint" funcionar de
- * verdade:
- *
- *   - `baseUrl` resolve o ENDEREÇO. Existe por causa dos dois casos que o
- *     registry precisa atender e que não têm endpoint fixo: um gateway
- *     OpenAI-compatível na frente da OpenRouter e, no roteiro do produto, um
- *     modelo rodando na máquina do próprio cliente;
- *   - `headers` resolve o ROTEAMENTO — há provedor OpenAI-compatível que exige
- *     cabeçalho próprio. Medido no OpenCode Go: sem `x-opencode-session` a
- *     resposta é 400 `MissingSessionID`, e com ele é 200.
- *
- * Os dois são opcionais: os providers canônicos ignoram e continuam indo ao
- * endpoint intrínseco de terem sido escolhidos. Mas ignorar em silêncio o que a
- * tela oferece já custou uma correção (o `baseUrl` que só a OpenRouter e a
- * DeepSeek honravam) — por isso todo provedor que a tela deixa configurar
- * recebe os dois.
+ * O terceiro parâmetro é o endpoint escolhido no painel de provedores
+ * (`ai_purpose_bindings.base_url`). Existe por causa dos dois casos que o
+ * registry precisa atender e que não têm endpoint fixo: um gateway
+ * OpenAI-compatível na frente da OpenRouter e, no roteiro do produto, um modelo
+ * rodando na máquina do próprio cliente. É opcional — os providers canônicos
+ * ignoram e continuam indo ao endpoint intrínseco de terem sido escolhidos.
  */
 export type ProviderRegistry = Record<
   string,
-  (
-    apiKey: string,
-    modelId: string,
-    baseUrl?: string,
-    headers?: Record<string, string> | null,
-  ) => LanguageModel
+  (apiKey: string, modelId: string, baseUrl?: string) => LanguageModel
 >;
-
-/**
- * Só devolve `headers` quando há algum — passar `{}` não muda nada, mas um
- * campo vazio no objeto do SDK é ruído em log e em rastro de erro.
- */
-function cabecalhosDoPonto(
-  headers: Record<string, string> | null | undefined,
-): { headers: Record<string, string> } | Record<string, never> {
-  if (!headers || Object.keys(headers).length === 0) return {};
-  return { headers };
-}
 
 /**
  * Endpoint canônico do provider Anthropic (baseURL default do @ai-sdk/anthropic). NÃO é
@@ -215,12 +188,8 @@ export function createDefaultRegistry(opts?: {
     };
   };
   return {
-    anthropic: (apiKey, modelId, _baseUrl, headers) =>
-      createAnthropic({
-        apiKey,
-        ...cabecalhosDoPonto(headers),
-        fetch: contain(ANTHROPIC_ENDPOINT),
-      })(modelId),
+    anthropic: (apiKey, modelId) =>
+      createAnthropic({ apiKey, fetch: contain(ANTHROPIC_ENDPOINT) })(modelId),
     /**
      * O `baseUrl` do painel é honrado aqui pela MESMA razão da OpenRouter e da
      * DeepSeek abaixo — e a ausência dele era um defeito, não uma decisão: a
@@ -235,21 +204,12 @@ export function createDefaultRegistry(opts?: {
      * de "modelo local" (gateway OpenAI-compatível no host do cliente) vira
      * configuração de tela em vez de código.
      */
-    openai: (apiKey, modelId, baseUrl, headers) => {
+    openai: (apiKey, modelId, baseUrl) => {
       const endpoint = baseUrl ?? OPENAI_ENDPOINT;
-      return createOpenAI({
-        apiKey,
-        baseURL: endpoint,
-        ...cabecalhosDoPonto(headers),
-        fetch: contain(endpoint),
-      })(modelId);
+      return createOpenAI({ apiKey, baseURL: endpoint, fetch: contain(endpoint) })(modelId);
     },
-    google: (apiKey, modelId, _baseUrl, headers) =>
-      createGoogleGenerativeAI({
-        apiKey,
-        ...cabecalhosDoPonto(headers),
-        fetch: contain(GOOGLE_ENDPOINT),
-      })(modelId),
+    google: (apiKey, modelId) =>
+      createGoogleGenerativeAI({ apiKey, fetch: contain(GOOGLE_ENDPOINT) })(modelId),
     /**
      * O `baseUrl` do painel é honrado aqui, e a allowlist do egress passa a ser
      * a DELE — não a da OpenRouter mais um furo. Apontar para um gateway
@@ -257,15 +217,12 @@ export function createDefaultRegistry(opts?: {
      * endpoint canônico faria o egress bloquear a própria configuração que a
      * tela ofereceu, com erro de rede que ninguém liga ao painel.
      */
-    openrouter: (apiKey, modelId, baseUrl, headers) => {
+    openrouter: (apiKey, modelId, baseUrl) => {
       const endpoint = baseUrl ?? OPENROUTER_ENDPOINT;
       return createOpenAI({
         apiKey,
         baseURL: endpoint,
-        // Atribuição da OpenRouter + cabeçalhos do PONTO. O do ponto vem depois
-        // de propósito: é escolha explícita do operador e deve poder sobrepor —
-        // a rota recusa `Authorization`, então a chave nunca é sobreposta.
-        ...cabecalhosDoPonto({ ...cabecalhosDeAtribuicaoOpenRouter(), ...(headers ?? {}) }),
+        headers: cabecalhosDeAtribuicaoOpenRouter(),
         fetch: contain(endpoint),
       })(modelId);
     },
@@ -275,31 +232,21 @@ export function createDefaultRegistry(opts?: {
      * gateway, e a allowlist do egress precisa ser a DELE — fixá-la no endpoint
      * canônico bloquearia a configuração que a própria tela permitiu.
      */
-    deepseek: (apiKey, modelId, baseUrl, headers) => {
+    deepseek: (apiKey, modelId, baseUrl) => {
       const endpoint = baseUrl ?? DEEPSEEK_ENDPOINT;
       const contido = contain(endpoint);
       const fetchFinal =
         opts?.deepseekThinking === 'disabled' ? comRaciocinioDesligado(contido) : contido;
-      return createOpenAI({
-        apiKey,
-        baseURL: endpoint,
-        ...cabecalhosDoPonto(headers),
-        fetch: fetchFinal,
-      })(modelId);
+      return createOpenAI({ apiKey, baseURL: endpoint, fetch: fetchFinal })(modelId);
     },
     /**
      * Z.ai (GLM) é OpenAI-compatível e aceita `base_url` próprio pela mesma
      * razão da OpenRouter/DeepSeek: o painel oferece apontar para um gateway, e
      * a allowlist do egress precisa ser a DELE.
      */
-    zai: (apiKey, modelId, baseUrl, headers) => {
+    zai: (apiKey, modelId, baseUrl) => {
       const endpoint = baseUrl ?? ZAI_ENDPOINT;
-      return createOpenAI({
-        apiKey,
-        baseURL: endpoint,
-        ...cabecalhosDoPonto(headers),
-        fetch: contain(endpoint),
-      })(modelId);
+      return createOpenAI({ apiKey, baseURL: endpoint, fetch: contain(endpoint) })(modelId);
     },
   };
 }

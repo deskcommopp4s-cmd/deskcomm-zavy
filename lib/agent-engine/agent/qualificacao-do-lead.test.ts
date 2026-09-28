@@ -114,7 +114,6 @@ const BINDING: LinhaDeBinding = {
   credential_id: "cred-1",
   model_id: "jev-latest",
   base_url: null,
-  headers: null,
   is_enabled: true,
 };
 

@@ -116,7 +116,6 @@ describe("o ponto auxiliar não cruza provider de um com modelo de outro", () =>
           credential_id: "cred-openrouter",
           model_id: "meta-llama/llama-3.3-70b-instruct",
           base_url: null,
-          headers: null,
           is_enabled: true,
         },
       }),

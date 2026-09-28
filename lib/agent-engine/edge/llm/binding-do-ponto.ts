@@ -32,7 +32,7 @@ export async function carregarBinding(
   purpose: string,
 ): Promise<LinhaDeBinding | null> {
   const { rows } = await db.query<LinhaDeBinding>(
-    `select purpose, provider, credential_id, model_id, base_url, headers, is_enabled
+    `select purpose, provider, credential_id, model_id, base_url, is_enabled
        from ai_purpose_bindings
       where organization_id = $1 and purpose = $2 and is_enabled
       limit 1`,

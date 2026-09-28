@@ -33,7 +33,6 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
   SelectContent,
@@ -57,8 +56,6 @@ interface Ponto {
     modelId: string | null;
     credentialId: string | null;
     baseUrl: string | null;
-    /** Cabeçalhos extras do ponto, ou null (migration 0268). */
-    headers?: Record<string, string> | null;
     origem: string;
     porQue: string;
   };
@@ -98,46 +95,6 @@ interface Dados {
   modelos: Modelo[];
   padrao: { provider: string; defaultModel: string | null };
   podeEditar: boolean;
-}
-
-/**
- * Cabeçalhos do ponto: a TELA edita texto (uma linha `Nome: valor`), a API
- * recebe objeto.
- *
- * O formato de linha, e não JSON cru, porque o operador já o conhece de `curl`
- * e de arquivo de configuração — pedir sintaxe de JSON a quem só quer rotear
- * uma chamada é transferir dificuldade para quem não pediu nenhuma. Uma linha
- * malformada é RECUSADA em vez de ignorada: perder um cabeçalho em silêncio
- * deixaria a mesma falha de antes (configuração salva que não configurou nada).
- */
-function headersParaTexto(headers: Record<string, string> | null | undefined): string {
-  if (!headers) return "";
-  return Object.entries(headers)
-    .map(([nome, valor]) => `${nome}: ${valor}`)
-    .join("\n");
-}
-
-/** Linhas que não casam com `Nome: valor` (sem dois-pontos, ou sem nome). */
-function linhasInvalidasDeHeader(texto: string): string[] {
-  return texto
-    .split("\n")
-    .map((l) => l.trim())
-    .filter((l) => l !== "" && l.indexOf(":") <= 0);
-}
-
-function textoParaHeaders(texto: string): Record<string, string> | null {
-  const linhas = texto
-    .split("\n")
-    .map((l) => l.trim())
-    .filter(Boolean);
-  if (linhas.length === 0) return null;
-  const obj: Record<string, string> = {};
-  for (const linha of linhas) {
-    const i = linha.indexOf(":");
-    if (i <= 0) continue;
-    obj[linha.slice(0, i).trim()] = linha.slice(i + 1).trim();
-  }
-  return Object.keys(obj).length > 0 ? obj : null;
 }
 
 export function PainelDeProvedores() {
@@ -605,7 +562,6 @@ function CartaoDoPonto({
   const [modelId, setModelId] = useState(ponto.efetivo.modelId ?? "");
   const [credentialId, setCredentialId] = useState(ponto.efetivo.credentialId ?? "");
   const [baseUrl, setBaseUrl] = useState(ponto.efetivo.baseUrl ?? "");
-  const [headersTexto, setHeadersTexto] = useState(headersParaTexto(ponto.efetivo.headers));
   const [salvando, setSalvando] = useState(false);
   // Resultado do teste — `null` = ainda não testou. Guardar o ÚLTIMO resultado
   // (e não um booleano "ok") é o que permite mostrar o MOTIVO da falha: trocar
@@ -627,16 +583,6 @@ function CartaoDoPonto({
   const editavel = dados.podeEditar && ponto.fixo === null && !ponto.mandadoPeloAgente;
 
   async function salvar() {
-    // Linha de cabeçalho malformada RECUSA o salvamento. Ignorá-la calada
-    // deixaria a configuração salva sem o cabeçalho que o provedor exige — e o
-    // erro só apareceria na chamada, longe do painel que prometeu tê-lo gravado.
-    const invalidas = linhasInvalidasDeHeader(headersTexto);
-    if (invalidas.length > 0) {
-      toast.error(
-        `${t("Cabeçalho sem formato `Nome: valor`:")} ${invalidas.join(" · ")}`,
-      );
-      return;
-    }
     setSalvando(true);
     try {
       const res = await fetch("/api/v1/ai/providers", {
@@ -653,10 +599,6 @@ function CartaoDoPonto({
           // local) só conseguia pela API. Configuração sem superfície é
           // capacidade que ninguém alcança.
           base_url: aceitaEndpointProprio && baseUrl.trim() !== "" ? baseUrl.trim() : null,
-          // Os cabeçalhos acompanham o endereço: há gateway que só responde com
-          // o cabeçalho de roteamento dele (o OpenCode Go devolve 400
-          // MissingSessionID sem `x-opencode-session`).
-          headers: aceitaEndpointProprio ? textoParaHeaders(headersTexto) : null,
         }),
       });
       const json = await res.json();
@@ -688,15 +630,6 @@ function CartaoDoPonto({
    * ao abrir a tela.
    */
   async function testar() {
-    // Mesma recusa do salvar: testar com uma linha malformada daria veredito
-    // sobre uma configuração que o salvamento não aceitaria.
-    const invalidas = linhasInvalidasDeHeader(headersTexto);
-    if (invalidas.length > 0) {
-      toast.error(
-        `${t("Cabeçalho sem formato `Nome: valor`:")} ${invalidas.join(" · ")}`,
-      );
-      return;
-    }
     setTestando(true);
     setTeste(null);
     try {
@@ -708,9 +641,6 @@ function CartaoDoPonto({
           model_id: modelId,
           credential_id: credentialId || null,
           base_url: baseUrl.trim() !== "" ? baseUrl.trim() : null,
-          // O teste é sobre o par (endereço + cabeçalho) da TELA: há gateway
-          // que só responde com o cabeçalho de roteamento dele.
-          headers: aceitaEndpointProprio ? textoParaHeaders(headersTexto) : null,
         }),
       });
       const json = await res.json();
@@ -892,36 +822,6 @@ function CartaoDoPonto({
               <p className="mt-1 text-xs text-muted-foreground">
                 {t(
                   "Deixe em branco para usar o endereço oficial do provedor. Use isto para apontar para um gateway compatível com a API da OpenAI — inclusive um modelo rodando na sua própria máquina.",
-                )}
-              </p>
-            </div>
-          )}
-
-          {/* Os cabeçalhos ficam junto do ENDEREÇO, e não num canto próprio: os
-              dois resolvem a mesma coisa (falar com um gateway), e há provedor
-              que só responde com o cabeçalho dele — o OpenCode Go devolve 400
-              MissingSessionID sem `x-opencode-session`. Separar os dois campos
-              faria o operador configurar metade e a chamada falhar por um motivo
-              que não aponta para cá. */}
-          {aceitaEndpointProprio && (
-            <div className="sm:col-span-3">
-              <Label className="text-xs">{t("Cabeçalhos extras (opcional)")}</Label>
-              <Textarea
-                value={headersTexto}
-                rows={2}
-                // Mudar o cabeçalho invalida o veredito, como o endereço: o
-                // "Respondeu" verde é sobre o que foi TESTADO.
-                onChange={(e) => {
-                  setHeadersTexto(e.target.value);
-                  setTeste(null);
-                }}
-                placeholder="x-opencode-session: abc123def456"
-                className="font-mono text-xs"
-                data-testid={`headers-${ponto.id}`}
-              />
-              <p className="mt-1 text-xs text-muted-foreground">
-                {t(
-                  "Um por linha, no formato Nome: valor. Para provedores que exigem cabeçalho próprio para rotear a chamada (ex.: x-opencode-session). O Authorization não se define aqui: a chave fica em Credenciais.",
                 )}
               </p>
             </div>
