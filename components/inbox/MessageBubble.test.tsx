@@ -44,6 +44,11 @@ function msg(over: Partial<Message> = {}): Message {
     media_mime: null,
     media_size_bytes: null,
     media_storage_path: null,
+    // O que o worker de derivação extraiu da mídia (migration 0128). Nulos aqui
+    // porque o balão não depende deles: a transcrição tem teste próprio em
+    // `AudioPlayer.test.tsx`.
+    media_derived_text: null,
+    media_derived_status: null,
     sent_via: "user",
     sent_by_user_id: null,
     sent_at: "2026-09-08T12:00:00.000Z",

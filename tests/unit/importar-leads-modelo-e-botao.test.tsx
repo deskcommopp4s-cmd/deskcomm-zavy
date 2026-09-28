@@ -22,9 +22,19 @@ import { ImportarLeads } from "@/app/app/kanban/_components/ImportarLeads";
 
 vi.mock("@/hooks/i18n/useT", () => ({ useT: () => (s: string) => s }));
 
+// A lista vem inteira, e não só com id/nome: o tipo da tela é o `FunilDaLista`
+// do kanban, e um funil de mentira com metade dos campos passaria a mentir
+// justamente no teste cujo assunto é a tela desenhar o que veio do banco.
 const FUNIS = [
-  { id: "f1", name: "Vendas" },
-  { id: "f2", name: "Pós-venda" },
+  { id: "f1", name: "Vendas", slug: "vendas", description: null, position: 1000, is_default: true },
+  {
+    id: "f2",
+    name: "Pós-venda",
+    slug: "pos-venda",
+    description: null,
+    position: 2000,
+    is_default: false,
+  },
 ];
 
 afterEach(() => {
