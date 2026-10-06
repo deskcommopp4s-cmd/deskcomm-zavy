@@ -254,6 +254,31 @@ beforeAll(() => {
             values (v_org, false);
         end if;
 
+        -- support_threads (0268): o chamado de suporte. 1 thread = 1 chamado, e o
+        -- `opened_by` e o usuario da PROPRIA org (o historico e por usuario).
+        -- Vazar entre organizacoes diria a uma empresa o que a outra perguntou ao
+        -- suporte — e a thread carrega o texto do chamado.
+        if not exists (select 1 from public.support_threads where organization_id = v_org) then
+          insert into public.support_threads (organization_id, opened_by, assunto, status)
+            values (
+              v_org,
+              case when v_org = '${ORG_A}'::uuid then '${USER_A}'::uuid else '${USER_B}'::uuid end,
+              'rls',
+              'aberto'
+            );
+        end if;
+
+        -- support_messages (0268): a mensagem do chamado, derivada da thread.
+        -- A visibilidade dela e por EXISTS na thread (nao org-flat) — e o
+        -- controle positivo aqui prova que o dono continua lendo a sua.
+        if not exists (select 1 from public.support_messages where organization_id = v_org) then
+          insert into public.support_messages (organization_id, thread_id, author_kind, author_id, body)
+            select v_org, t.id, 'usuario', t.opened_by, 'rls'
+              from public.support_threads t
+             where t.organization_id = v_org
+             limit 1;
+        end if;
+
         if not exists (select 1 from public.push_subscriptions where organization_id = v_org) then
           insert into public.push_subscriptions
             (organization_id, user_id, endpoint, p256dh, auth)
@@ -327,6 +352,14 @@ export const TABLES = [
   // aceitou o risco do segundo aparelho vinculado: vazar entre organizacoes
   // diria a uma empresa quem, na outra, ligou a feature e quando.
   "org_voice_calls",
+  // migration 0268 — o chamado de suporte e as mensagens dele. A thread e de UM
+  // cliente mas escrita PELA plataforma: a policy de SELECT e UMA so com OR
+  // interno (duas permissivas seriam OR-adas e a restricao por `opened_by`
+  // desapareceria — o erro da 0035), e a mensagem deriva da thread por EXISTS.
+  // As duas entram aqui porque a prova comportamental e o que separa "a policy
+  // existe" de "a policy cerca".
+  "support_threads",
+  "support_messages",
   // ⚠️ `webhook_lead_captures` (migration 0174) NÃO entra nesta lista, e a
   // ausência é deliberada: a policy dela exige `manager`, e o usuário semeado
   // aqui é `agent` — o controle positivo falharia por ACERTO, e a "correção"
