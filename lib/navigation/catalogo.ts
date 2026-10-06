@@ -557,6 +557,20 @@ export const NAV_CATALOG = [
     section: "Sua conta",
   },
   {
+    href: "/app/support",
+    label: "Ajuda",
+    description: "Fale com o suporte do sistema — dentro do CRM, sem sair para o WhatsApp.",
+    icon: "Lifebuoy",
+    group: "organizacao",
+    section: "Sua conta",
+    // COM `sidebar`: diferente das outras dez de "organizacao", esta PRECISA
+    // ser achada. O dono já perdeu uma função por ela estar atrás de
+    // "Configuração avançada" — esconder o canal de ajuda atrás de
+    // "Configurações" repetiria exatamente esse erro. O gate e2e
+    // `navegacao.spec.ts` mede a dobra do menu item a item; se ela estourar,
+    // o ajuste é o menu, não o esconderijo.
+  },
+  {
     href: "/app/settings/notifications",
     label: "Notificações",
     description: "Por onde e sobre o quê você quer ser avisado.",

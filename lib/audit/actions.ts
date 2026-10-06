@@ -596,6 +596,15 @@ export const AUDIT_ACTIONS = [
   // Auditável porque muda como o agente move o card: com ela ligada o negócio
   // pode ANDAR PARA TRÁS no funil.
   "crm.regressao_de_funil_alterada",
+
+  // ── Suporte (migration 0268) ────────────────────────────────────────────
+  // A PLATAFORMA lendo a conta de um cliente para atender. Auditável porque é
+  // leitura CROSS-TENANT com service_role (bypassa RLS): sem esta trilha não há
+  // como responder "quem viu a conta de quem" — que é a primeira pergunta de uma
+  // auditoria de LGPD.
+  "support.thread_read",
+  // A PLATAFORMA respondendo no chamado. Muda o estado dele e diz quem atendeu.
+  "support.thread_replied",
 ] as const;
 
 /** Um código de auditoria. Derivado de `AUDIT_ACTIONS` — não redigite a lista. */

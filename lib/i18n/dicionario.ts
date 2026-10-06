@@ -584,7 +584,6 @@ export const DICIONARIO: Traducoes = {
   "Fuso horário da janela": { es: "Huso horario de la ventana" },
 
   // ─── Estados e avisos que aparecem em várias telas ───
-  "Carregando…": { es: "Cargando…" },
   "Nenhum resultado": { es: "Ningún resultado" },
   Erro: { es: "Error" },
   Excluir: { es: "Eliminar" },
@@ -6203,7 +6202,6 @@ export const DICIONARIO: Traducoes = {
   "A sugestão vence em": { es: "La sugerencia vence en" },
   "Retomar contato com este negócio": { es: "Retomar contacto con este negocio" },
   "Encerrar: não retomar este negócio": { es: "Cerrar: no retomar este negocio" },
-  "Encerrar": { es: "Cerrar" },
   "Probabilidade": { es: "Probabilidad" },
   "Ver o porquê.": { es: "Ver el porqué." },
   "ver a mensagem": { es: "ver el mensaje" },
@@ -6600,7 +6598,6 @@ export const DICIONARIO: Traducoes = {
   "Turnos até o desfecho (mediana)": { es: "Turnos hasta el desenlace (mediana)" },
   "Vetos por execução": { es: "Vetos por ejecución" },
   "do atendente": { es: "del agente" },
-  "aberto": { es: "abierto" },
   "abertos": { es: "abiertos" },
 
   // ─── O que a main de 1.8.0 trouxe: acervo de conhecimento, push, agenda ───
@@ -9009,6 +9006,39 @@ export const DICIONARIO: Traducoes = {
   "Não conseguimos transcrever este áudio.": {
     es: "No pudimos transcribir este audio.",
   },
+  // --- Suporte (migration 0268) ---
+  "Ajuda": { es: "Ayuda" },
+  "Abrir chamado": { es: "Abrir ticket" },
+  "Abrir um chamado": { es: "Abrir un ticket" },
+  "Sua mensagem": { es: "Tu mensaje" },
+  "Encerrar": { es: "Cerrar" },
+  "Nota": { es: "Nota" },
+  "Chamado": { es: "Ticket" },
+  "Chamado aberto.": { es: "Ticket abierto." },
+  "Chamado encerrado.": { es: "Ticket cerrado." },
+  "Este chamado foi encerrado.": { es: "Este ticket fue cerrado." },
+  "Como foi o atendimento?": { es: "¿Cómo fue la atención?" },
+  "Conte o que aconteceu, com o máximo de detalhe.": { es: "Cuenta qué pasó, con el mayor detalle posible." },
+  "Fale com o suporte do sistema. A conversa fica aqui dentro — não sai para o WhatsApp.": { es: "Habla con el soporte del sistema. La conversación queda aquí dentro — no sale a WhatsApp." },
+  "Não consegui carregar seus chamados.": { es: "No pude cargar tus tickets." },
+  "Não consegui abrir o chamado.": { es: "No pude abrir el ticket." },
+  "Não consegui enviar.": { es: "No pude enviar." },
+  "Não consegui encerrar o chamado.": { es: "No pude cerrar el ticket." },
+  "Assistente": { es: "Asistente" },
+  "Suporte": { es: "Soporte" },
+  "aberto": { es: "abierto" },
+  "com_ia": { es: "con IA" },
+  "com_humano": { es: "con una persona" },
+  "ia_falhou": { es: "la IA no pudo" },
+  "resolvido": { es: "resuelto" },
+  "fechado": { es: "cerrado" },
+  // --- Suporte (plataforma) ---
+  "Chamados abertos pelas contas. Responder aqui não altera nada no sistema do cliente.": { es: "Tickets abiertos por las cuentas. Responder aquí no cambia nada en el sistema del cliente." },
+  "Não consegui carregar a fila.": { es: "No pude cargar la fila." },
+  "Não consegui responder.": { es: "No pude responder." },
+  "Nenhum chamado esperando.": { es: "Ningún ticket esperando." },
+  "Sua resposta": { es: "Tu respuesta" },
+  "Carregando…": { es: "Cargando…" },
 };
 
 /**

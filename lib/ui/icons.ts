@@ -81,6 +81,7 @@ export {
   ClockCountdown,
   // painéis de evolução / aprendizado
   ChartLineUp,
+  Lifebuoy,
   Lightbulb,
   // theme
   Sun,
