@@ -255,9 +255,10 @@ beforeAll(() => {
         end if;
 
         -- support_threads (0268): o chamado de suporte. 1 thread = 1 chamado, e o
-        -- `opened_by` e o usuario da PROPRIA org (o historico e por usuario).
+        -- opened_by e o usuario da PROPRIA org (o historico e por usuario).
         -- Vazar entre organizacoes diria a uma empresa o que a outra perguntou ao
         -- suporte — e a thread carrega o texto do chamado.
+        -- (sem crase nesta prosa: o bloco inteiro e um template literal de JS.)
         if not exists (select 1 from public.support_threads where organization_id = v_org) then
           insert into public.support_threads (organization_id, opened_by, assunto, status)
             values (
