@@ -38,6 +38,8 @@ export type InboxKind =
   | 'promotion_review'
   | 'judge_unaligned'
   | 'followup_dead'
+  // migration 0268 — a plataforma respondeu no chamado de suporte.
+  | 'suporte_resposta'
   | 'snooze_expired'
   | 'next_action_ambiguous'
   | 'risk_backlog_seeded'

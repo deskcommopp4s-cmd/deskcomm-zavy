@@ -120,6 +120,28 @@ export async function POST(req: NextRequest, { params }: RouteParams): Promise<R
     .update({ status: "com_humano", assigned_to: ctx.user.id })
     .eq("id", id);
 
+  /**
+   * O aviso na Central do CLIENTE — não da plataforma.
+   *
+   * É o padrão que o follow-up já usa (`lib/followup/engine.ts`): o item nasce
+   * com o `organization_id` do TENANT, então o sino da conta o conta. Criar com
+   * `organization_id` nulo cairia num buraco — a rota da Central exclui itens de
+   * plataforma por desenho ("nunca entram aqui"), e a refutação mediu que
+   * NENHUM consumidor lê aquele valor. O aviso existiria no banco e ninguém o
+   * veria, com o cliente esperando.
+   *
+   * O `ref_kind` leva o id do CHAMADO: o sino vira o botão que abre ele.
+   */
+  await admin.from("agent_inbox_items").insert({
+    organization_id: thread.organization_id,
+    kind: "suporte_resposta",
+    severity: "info",
+    title: "O suporte respondeu no seu chamado",
+    body: parsed.data.body.slice(0, 200),
+    ref_kind: "support_thread",
+    ref_id: id,
+  });
+
   await audit({
     action: "support.thread_replied",
     organizationId: thread.organization_id,

@@ -23,6 +23,9 @@ export const REFERENCIAS_DE_AVISO = {
   channel_session: { tabela: "channel_sessions", papel: "admin", rotulo: "Revisar conexão", href: () => "/app/connections", ativo: true },
   ai_knowledge_source: { tabela: "ai_knowledge_sources", papel: "manager", rotulo: "Abrir base de conhecimento", href: () => "/app/ai/knowledge/sources" },
   agent_case: { tabela: "agent_cases", papel: "agent", rotulo: "Abrir atendimento", href: (id: string) => `/app/ai/cases?caso=${id}` },
+  // migration 0268 — o chamado de suporte. O aviso vai para o DONO do chamado
+  // (quem abriu), na Central da propria organizacao — nunca para a plataforma.
+  support_thread: { tabela: "support_threads", papel: "agent", rotulo: "Abrir chamado", href: (id: string) => `/app/support?chamado=${id}` },
 } satisfies Record<string, Alvo>;
 
 export type InboxRefKind = keyof typeof REFERENCIAS_DE_AVISO | "organization" | "ai_budget" | "job_queue" | "cron_jobs";
@@ -48,6 +51,8 @@ export const POLITICAS_DE_AVISO = {
   promotion_review: { refs: [], orientacao: "Na evolução do assistente, confira as propostas disponíveis. Este aviso não identifica uma proposta específica.", geral: EVOLUCAO },
   judge_unaligned: { refs: [], orientacao: "Na evolução do assistente, confira a avaliação de qualidade. Este aviso não identifica uma avaliação específica.", geral: EVOLUCAO },
   followup_dead: { refs: ["followup_enrollment"], orientacao: "Peça ao gestor para revisar o acompanhamento que parou." },
+  // O suporte respondeu: o dono do chamado precisa saber SEM ficar recarregando a tela.
+  suporte_resposta: { refs: ["support_thread"], orientacao: "Abra o chamado e veja a resposta do suporte." },
   snooze_expired: { refs: ["conversation"], orientacao: "Confira se cabe retomar o atendimento descrito neste aviso." },
   next_action_ambiguous: { refs: ["contact"], orientacao: "Confira os negócios do contato e escolha a qual deles pertence a próxima ação." },
   risk_backlog_seeded: { refs: ["organization"], orientacao: "Revise os negócios parados no Radar e defina o próximo passo." },

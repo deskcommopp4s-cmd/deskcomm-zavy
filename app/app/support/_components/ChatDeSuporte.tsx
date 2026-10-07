@@ -15,6 +15,7 @@
  * (é a pendência do badge) — então esta tela não promete um aviso que não chega.
  */
 import { useCallback, useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -81,6 +82,16 @@ export function ChatDeSuporte() {
   useEffect(() => {
     if (aberto) void carregarMensagens(aberto);
   }, [aberto, carregarMensagens]);
+
+  /**
+   * `?chamado=<id>` abre o chamado direto — é para onde o aviso da Central leva.
+   * Sem isto, o sino notificaria e o clique cairia numa lista, obrigando a
+   * pessoa a procurar o chamado que o aviso acabou de apontar.
+   */
+  const chamadoDaUrl = useSearchParams().get("chamado");
+  useEffect(() => {
+    if (chamadoDaUrl) setAberto(chamadoDaUrl);
+  }, [chamadoDaUrl]);
 
   async function abrirChamado() {
     const texto = rascunho.trim();
