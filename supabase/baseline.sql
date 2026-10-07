@@ -10115,6 +10115,11 @@ alter table public.agent_inbox_items
     -- lista, não em bloco novo (#159, bloco único por constraint).
     'voice_call_missed',
     'case_stale',
+    -- (migration 0269) A plataforma respondeu no chamado de suporte. Entra NESTA
+    -- lista, no fim (#159, bloco único por constraint): o aviso nasce na Central
+    -- do TENANT, e sem o valor aqui o INSERT do `support_threads` era recusado
+    -- pela CHECK — o cliente ficaria sem saber da resposta.
+    'suporte_resposta',
     'other'
   ));
 
