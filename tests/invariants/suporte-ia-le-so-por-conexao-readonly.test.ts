@@ -48,8 +48,13 @@ afterAll(async () => {
 describe("a IA do suporte só LÊ — a trava é a conexão, não a policy", () => {
   it("o modo está ATIVO na conexão que o módulo entrega", async () => {
     // A medição que teria pegado o `options` morto: `off` significa trava ausente.
-    const { rows } = await leitura.query<{ v: string }>("show default_transaction_read_only");
-    expect(rows[0]?.v).toBe("on");
+    // `show X` devolve uma coluna com o NOME do parâmetro, não `v` — foi o que
+    // fez este teste reprovar no CI com `undefined` enquanto a recusa (o teste
+    // de baixo) passava: o read-only FUNCIONAVA, o nome é que estava errado.
+    const { rows } = await leitura.query<{ default_transaction_read_only: string }>(
+      "show default_transaction_read_only",
+    );
+    expect(rows[0]?.default_transaction_read_only).toBe("on");
   });
 
   it("a conexão de leitura RECUSA escrita (a trava existe)", async () => {
