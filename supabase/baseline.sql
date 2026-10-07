@@ -27131,3 +27131,16 @@ drop trigger if exists trg_platform_decision_credentials_updated_at on public.pl
 create trigger trg_platform_decision_credentials_updated_at
   before update on public.platform_decision_credentials
   for each row execute function public.fn_set_updated_at();
+
+-- ---- support_threads: escalado sem dono e estado legitimo (migration 0271) ----
+-- A 0268 exigia `assigned_to` para `com_humano`, mas "a IA escalou e ninguem
+-- pegou ainda" (a fila) e o momento mais comum. `escalated_at` marca que a
+-- escalada aconteceu; `assigned_to` marca o dono, quando houver.
+alter table public.support_threads
+  drop constraint if exists support_threads_humano_check;
+
+alter table public.support_threads
+  add constraint support_threads_humano_check check (
+    (status <> 'com_humano') or (assigned_to is not null) or (escalated_at is not null)
+  );
+

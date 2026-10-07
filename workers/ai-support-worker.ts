@@ -170,11 +170,20 @@ export async function processSupportMessage(event: EventRow): Promise<SupportRes
         gerado.motivo_curto ?? "a IA pediu ajuda de uma pessoa",
       );
     } else {
-      await admin
+      const { error: erroStatus } = await admin
         .from("support_threads")
         .update({ status: "com_ia" })
         .eq("id", threadId)
         .eq("organization_id", event.organization_id);
+      // Checar importa: sem isto, um CHECK recusando a transicao deixaria o
+      // chamado no estado anterior com a resposta JA gravada — e o operador
+      // olhando um chamado "aberto" que tem resposta da IA dentro.
+      if (erroStatus) {
+        console.warn("[ai-support-worker] status com_ia falhou", {
+          thread_id: threadId,
+          error: erroStatus.message.slice(0, 200),
+        });
+      }
     }
 
     logInvocation({
@@ -214,7 +223,18 @@ async function escalar(
   organizationId: string,
   motivo: string,
 ): Promise<void> {
-  await admin
+  // ── O ERRO E CHECADO, E NAO ERA ──────────────────────────────────────────
+  //
+  // Medido em 07/10/2026: o CHECK `support_threads_humano_check` recusava
+  // `com_humano` sem `assigned_to`, e este `update` falhava EM SILENCIO. O
+  // resultado foi o pior desfecho possivel do fluxo: o aviso "seu chamado foi
+  // para uma pessoa" nasceu na Central do cliente, e o chamado continuou
+  // `aberto`. O cliente avisado de uma pessoa que nao viria; a plataforma sem
+  // ver o chamado na fila. Um `update` fire-and-forget produziu os dois.
+  //
+  // (A causa — o CHECK — foi corrigida na 0271. A checagem fica: a proxima
+  // transicao recusada pelo banco aparece no log em vez de sumir.)
+  const { error: erroEscalar } = await admin
     .from("support_threads")
     .update({
       status: "com_humano",
@@ -224,6 +244,12 @@ async function escalar(
     })
     .eq("id", threadId)
     .eq("organization_id", organizationId);
+  if (erroEscalar) {
+    console.warn("[ai-support-worker] escalada NAO gravada no chamado", {
+      thread_id: threadId,
+      error: erroEscalar.message.slice(0, 200),
+    });
+  }
 
   // O aviso nasce na Central do CLIENTE — o padrão do follow-up. `ref_kind`
   // leva o id do CHAMADO: o sino vira o botão que abre ele.
