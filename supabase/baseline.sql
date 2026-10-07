@@ -26836,6 +26836,38 @@ create policy support_write_delete on public.support_messages
 -- [ ] O REAPER (com_ia sem resposta / com_humano sem atendimento)
 -- [ ] Reservar o número da migration (o maior hoje é 0267)
 
+-- ---- suporte: a mensagem do CLIENTE acorda a IA (migration 0270) ----
+-- O gatilho, e não o route: a mensagem do cliente SEMPRE acorda a IA, por
+-- qualquer porta que a grave. Só `author_kind='usuario'` dispara — `ia`
+-- re-dispararia para sempre, `humano` atropelaria quem assumiu.
+create or replace function public.fn_support_message_acorda_a_ia()
+returns trigger
+  language plpgsql security definer
+  set search_path to 'public'
+as $$
+begin
+  if new.author_kind <> 'usuario' then
+    return new;
+  end if;
+  perform public.emit_event(
+    'support.message',
+    'support_thread',
+    new.thread_id,
+    jsonb_build_object('thread_id', new.thread_id, 'message_id', new.id),
+    '{}'::jsonb,
+    new.organization_id
+  );
+  return new;
+end;
+$$;
+
+revoke all on function public.fn_support_message_acorda_a_ia() from public, anon, authenticated;
+
+drop trigger if exists trg_support_message_acorda_a_ia on public.support_messages;
+create trigger trg_support_message_acorda_a_ia
+  after insert on public.support_messages
+  for each row execute function public.fn_support_message_acorda_a_ia();
+
 -- ---- VARREDURA anon: função nova nasce exposta em quem ATUALIZA (migration 0116) ----
 --
 -- ⚠️ ESTE BLOCO É, DE PROPÓSITO, O ÚLTIMO DO ARQUIVO. Apêndice novo entra ANTES

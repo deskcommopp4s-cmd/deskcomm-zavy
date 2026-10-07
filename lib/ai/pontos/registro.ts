@@ -300,6 +300,22 @@ export const PONTOS_DE_IA: readonly PontoDeIa[] = [
     registraEm: "llm_calls",
   },
   {
+    id: "suporte_atendimento",
+    rotulo: "Responder o chamado de suporte",
+    oQueFaz:
+      "Lê o chamado e o retrato da conta do cliente, responde o que dá para responder e escala para uma pessoa da plataforma o que não dá.",
+    papel: "atender",
+    // Sem tools: a IA recebe o RETRATO da conta já pronto (queries nossas, todas
+    // com o filtro de organização), não gera SQL. Dar a ela uma ferramenta de
+    // query deixaria a leitura cruzar contas — a conexão read-only impede a
+    // ESCRITA, não a leitura da conta do vizinho.
+    exige: {},
+    emissor: "workers/ai-support-worker.ts",
+    sintomaDeFalha:
+      "O cliente abre um chamado e ninguém responde: a IA não responde e não escala, e o pedido fica parado sem dono.",
+    registraEm: "llm_calls",
+  },
+  {
     id: "followup_classify",
     rotulo: "Ler a resposta ao follow-up",
     oQueFaz:

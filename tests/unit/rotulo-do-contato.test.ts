@@ -158,6 +158,12 @@ describe("a sétima cópia não nasce", () => {
    */
   const LEITURAS_LEGITIMAS: ReadonlyArray<{ arquivo: string; trecho: string; motivo: string }> = [
     {
+      arquivo: "lib/support/ia/contexto-da-conta.ts",
+      trecho: 'c.display_name ?? "(sem nome)"',
+      motivo:
+        "nome da ORGANIZAÇÃO no retrato da conta que a IA de suporte recebe; não é contato e não decide o nome exibido de ninguém",
+    },
+    {
       arquivo: "app/api/v1/channels/official/route.ts",
       trecho: "displayName: data?.display_name ?? null,",
       motivo: "nome do NÚMERO no canal oficial da Meta, não de contato",

@@ -93,6 +93,14 @@ const FORA_DO_SEAM: Record<string, { arquivo: string; marcador: string }> = {
     arquivo: "workers/ai-response-worker.ts",
     marcador: "resolverModeloDoPonto",
   },
+  // A IA de suporte usa `generateObject` direto (como o sentimento), não o seam
+  // do agent-engine — o retrato da conta e o histórico do chamado entram como
+  // prompt, não como turno de conversa. O marcador prova que o chamador continua
+  // vivo: apagá-lo reprova aqui em vez de deixar o ponto órfão no registro.
+  suporte_atendimento: {
+    arquivo: "workers/ai-support-worker.ts",
+    marcador: "resolverModeloDoPonto",
+  },
   embedding_indexar: { arquivo: "lib/ai/embed.ts", marcador: "embed(" },
   embedding_consultar: {
     arquivo: "lib/agent-engine/edge/llm/embed.ts",

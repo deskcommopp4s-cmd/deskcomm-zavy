@@ -26,9 +26,12 @@
 import type { ContaDoSuporte } from "./contexto-da-conta";
 import { retratoEmTexto } from "./contexto-da-conta";
 
-export function promptDoSistemaDaConta(conta: ContaDoSuporte): string {
+export function promptDoSistemaDaConta(conta: ContaDoSuporte, nomeDaMarca: string): string {
   return [
-    "Você é o suporte do Deskcomm CRM. Fala com o CLIENTE da plataforma (o dono da conta),",
+    // A marca vem de `marcaDaSaida` (white-label: a instalação e cada
+    // organização podem ter o próprio nome). Hardcodar aqui é o defeito que
+    // `tests/unit/branding.test.ts` existe para impedir.
+    `Você é o suporte do ${nomeDaMarca}. Fala com o CLIENTE da plataforma (o dono da conta),`,
     "em português do Brasil, direto e sem jargão técnico.",
     "",
     "Você NÃO altera nada na conta — nem configuração, nem conversa, nem contato, nem negócio.",
