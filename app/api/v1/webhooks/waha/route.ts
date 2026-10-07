@@ -178,6 +178,22 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     await dispatchWahaEvent(admin, session, contrato.envelope, requestId);
   } catch (err) {
     console.error("[waha.webhook] handler failed", err);
+    // ── 500, NÃO 200 ─────────────────────────────────────────────────────────
+    //
+    // Aqui devolvia 200 e o provider riscava o evento como ENTREGUE: a falha do
+    // handler virava irrecuperável — sem retry, sem erro visível, e o evento só
+    // existia como corpo cru no `webhook_events_log`. Medido (mesa de análise da
+    // A1, 05/10/2026): *"qualquer falha de handler é irrecuperável — o provider
+    // risca o evento como entregue"*.
+    //
+    // O retry é SEGURO: a ingestão é idempotente no nível da mensagem
+    // (`messages(organization_id, external_id)` + o 23505 tratado em
+    // `handleInbound`), então reentregar não duplica mensagem do cliente. É o
+    // que faz o 500 ser a resposta certa em vez de um 200 resignado.
+    //
+    // Não é o único caminho que grava mensagem — é o caminho por onde TODO
+    // webhook do WAHA passa. Engolir aqui esconde qualquer defeito de ingestão.
+    return fail("internal_error", "falha ao processar o evento", 500, { requestId });
   }
 
   return ok({ accepted: true }, { requestId });
