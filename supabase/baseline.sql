@@ -26893,6 +26893,9 @@ create policy "support_media_read" on storage.objects for select to authenticate
 --
 --
 
+--
+--
+
 create table if not exists public.campaigns (
   id uuid primary key default gen_random_uuid(),
   organization_id uuid not null references public.organizations(id) on delete cascade,
@@ -27079,37 +27082,55 @@ comment on table public.campaign_channels is
   'As conexões de uma campanha. Uma campanha = UMA classe de provider (oficial OU não oficial). O array campaigns.channel_session_ids vira espelho de leitura.';
 
 alter table public.campaigns
+  drop constraint if exists fk_campaigns_org;
+alter table public.campaigns
   add constraint fk_campaigns_org
     foreign key (organization_id) references public.organizations(id) on delete cascade;
 
+alter table public.campaign_recipients
+  drop constraint if exists fk_recipients_campaign_org;
 alter table public.campaign_recipients
   add constraint fk_recipients_campaign_org
     foreign key (organization_id, campaign_id)
     references public.campaigns(organization_id, id) on delete cascade;
 alter table public.campaign_recipients
+  drop constraint if exists fk_recipients_contact;
+alter table public.campaign_recipients
   add constraint fk_recipients_contact
     foreign key (contact_id) references public.contacts(id) on delete cascade;
+alter table public.campaign_recipients
+  drop constraint if exists fk_recipients_session;
 alter table public.campaign_recipients
   add constraint fk_recipients_session
     foreign key (channel_session_id) references public.channel_sessions(id) on delete restrict;
 alter table public.campaign_recipients
+  drop constraint if exists fk_recipients_conversation;
+alter table public.campaign_recipients
   add constraint fk_recipients_conversation
     foreign key (conversation_id) references public.conversations(id) on delete set null;
 
+alter table public.campaign_steps
+  drop constraint if exists fk_steps_campaign_org;
 alter table public.campaign_steps
   add constraint fk_steps_campaign_org
     foreign key (organization_id, campaign_id)
     references public.campaigns(organization_id, id) on delete cascade;
 
 alter table public.campaign_step_dispatches
+  drop constraint if exists fk_dispatches_recipient_org;
+alter table public.campaign_step_dispatches
   add constraint fk_dispatches_recipient_org
     foreign key (organization_id, recipient_id)
     references public.campaign_recipients(organization_id, id) on delete cascade;
 
 alter table public.campaign_channels
+  drop constraint if exists fk_channels_campaign_org;
+alter table public.campaign_channels
   add constraint fk_channels_campaign_org
     foreign key (organization_id, campaign_id)
     references public.campaigns(organization_id, id) on delete cascade;
+alter table public.campaign_channels
+  drop constraint if exists fk_channels_session;
 alter table public.campaign_channels
   add constraint fk_channels_session
     foreign key (channel_session_id) references public.channel_sessions(id) on delete cascade;

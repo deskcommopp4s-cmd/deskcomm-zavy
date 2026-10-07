@@ -60,6 +60,7 @@ CRONS="
 * * * * *|25|api/v1/cron/agent-dispatcher
 * * * * *|25|api/v1/cron/followup-flow-worker
 * * * * *|45|api/v1/cron/event-log-drain
+* * * * *|30|api/v1/cron/campaign-worker
 * * * * *|25|api/v1/cron/routing-worker
 * * * * *|25|api/v1/cron/recover-stuck-messages
 */5 * * * *|25|api/v1/cron/storage-redaction?limit=50

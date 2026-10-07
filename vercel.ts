@@ -17,6 +17,7 @@ const config: VercelConfig = {
     { path: "/api/v1/cron/agent-dispatcher", schedule: "* * * * *" },
     { path: "/api/v1/cron/followup-flow-worker", schedule: "* * * * *" },
     { path: "/api/v1/cron/event-log-drain", schedule: "* * * * *" },
+    { path: "/api/v1/cron/campaign-worker", schedule: "* * * * *" },
     { path: "/api/v1/cron/routing-worker", schedule: "* * * * *" },
     { path: "/api/v1/cron/recover-stuck-messages", schedule: "* * * * *" },
     { path: "/api/v1/cron/storage-redaction", schedule: "*/5 * * * *" },
