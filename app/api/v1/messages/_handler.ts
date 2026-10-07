@@ -849,13 +849,18 @@ export async function sendMessageHandler(
       // estado é o "enviado mentiroso": a linha entra na contagem, o freio e as
       // métricas a leem como verdade, e nada saiu.
       //
-      // MEDIDO (07/10/2026): com o WAHA isto NÃO é alcançável hoje — o
-      // `isConfigured()` dele é `getWahaClient() !== null`, exatamente a mesma
-      // condição do `if (!client) return { externalId: null }`, e o handler
-      // barra em `queued` antes de chegar aqui. A guarda abaixo é para o
-      // ADAPTER FUTURO que devolva null estando configurado — é o caso que a
-      // mesa de análise apontou e que o Meta Cloud já evita LANÇANDO (o
-      // comentário dele diz literalmente "faria o handler gravar sent sem id").
+      // MEDIDO (07/10/2026): com o canal atual isto NÃO é alcançável hoje — o
+      // `isConfigured()` dele é a MESMA condição do `if (!client) return
+      // { externalId: null }` do `send`, e o handler barra em `queued` antes de
+      // chegar aqui. A guarda abaixo é para o ADAPTER FUTURO que devolva null
+      // estando configurado — é o caso que a mesa de análise apontou e que um
+      // dos outros adapters já evita LANÇANDO (o comentário dele diz
+      // literalmente "faria o handler gravar sent sem id").
+      //
+      // (O provider não é nomeado aqui de propósito: a doutrina de restrição de
+      // canal vale para o TEXTO também, e `lint-channels` reprova o arquivo
+      // inteiro — inclusive comentário. Foi assim que esta correção reprovou no
+      // CI na primeira tentativa.)
       //
       // `failed` e não `queued`: `queued` promete "sai quando der", e aqui não
       // há razão para acreditar nisso — o adapter tentou e não confirmou.
