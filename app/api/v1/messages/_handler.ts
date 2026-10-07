@@ -842,6 +842,43 @@ export async function sendMessageHandler(
           ? (adapter.echoExternalIds?.({ externalId, recipient: chatId }) ?? [externalId])
           : [],
       );
+      // ── O ID É A PROVA DO ENVIO ─────────────────────────────────────────
+      //
+      // `external_id` nulo AQUI significa: o adapter disse que está configurado
+      // (`isConfigured()` passou) e o `send` voltou sem id. Gravar `sent` nesse
+      // estado é o "enviado mentiroso": a linha entra na contagem, o freio e as
+      // métricas a leem como verdade, e nada saiu.
+      //
+      // MEDIDO (07/10/2026): com o WAHA isto NÃO é alcançável hoje — o
+      // `isConfigured()` dele é `getWahaClient() !== null`, exatamente a mesma
+      // condição do `if (!client) return { externalId: null }`, e o handler
+      // barra em `queued` antes de chegar aqui. A guarda abaixo é para o
+      // ADAPTER FUTURO que devolva null estando configurado — é o caso que a
+      // mesa de análise apontou e que o Meta Cloud já evita LANÇANDO (o
+      // comentário dele diz literalmente "faria o handler gravar sent sem id").
+      //
+      // `failed` e não `queued`: `queued` promete "sai quando der", e aqui não
+      // há razão para acreditar nisso — o adapter tentou e não confirmou.
+      if (!externalId) {
+        const { data: semId } = await supabase
+          .from("messages")
+          .update({
+            status: "failed",
+            error_code: adapter.codes.sendFailed,
+            error_message: "O canal aceitou a chamada mas não devolveu o identificador da mensagem.",
+          })
+          .eq("id", message.id)
+          .select(MSG_COLS)
+          .maybeSingle();
+        if (semId) message = semId as unknown as Message;
+        throw new ApiError(
+          502,
+          "channel_no_id",
+          undefined,
+          ctx.requestId,
+          "O canal não confirmou o envio.",
+        );
+      }
       const { data: updated } = await supabase
         .from("messages")
         .update({
