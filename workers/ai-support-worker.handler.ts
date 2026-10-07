@@ -16,14 +16,21 @@ export const aiSupportHandler: EventHandler = {
   events: ["support.message"],
   async handle(row): Promise<HandlerResult> {
     const result = await processSupportMessage(row);
+    // `skipped`, não `ok`: o drain só mostra o motivo dos handlers que se
+    // declaram pulados (`drain.ts` — `pulados = results.filter(status ===
+    // "skipped")`). Devolver `ok` com o motivo escondia POR QUE a IA não
+    // respondeu — o sintoma exato que este repo trata como defeito.
+    if (result.skipped) {
+      return {
+        consumer_key: AI_SUPPORT_HANDLER_KEY,
+        status: "skipped",
+        detail: result.reason,
+      };
+    }
     return {
       consumer_key: AI_SUPPORT_HANDLER_KEY,
       status: "ok",
-      detail: result.skipped
-        ? `skip:${result.reason ?? "?"}`
-        : result.escalou
-          ? "escalou"
-          : "respondeu",
+      detail: result.escalou ? "escalou" : "respondeu",
     };
   },
 };
