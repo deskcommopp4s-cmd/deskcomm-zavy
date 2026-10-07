@@ -44,7 +44,15 @@ const respostaSchema = z.object({
     .describe(
       "true quando uma pessoa da plataforma precisa assumir: pedido de mudança, dado fora do retrato, reclamação, cobrança, ou dúvida sem certeza.",
     ),
-  motivo_curto: z.string().max(300).optional().describe("Quando escalar=true, o motivo em uma linha."),
+  // OBRIGATORIO, e nao `.optional()`: o DeepSeek recusa o schema quando
+  // `required` nao lista TODAS as propriedades ("Required properties must match
+  // all properties in the object", medido em 07/10/2026). Opcional aqui nao
+  // significa "pode faltar" — significa o schema inteiro ser recusado pelo
+  // provedor que a organizacao escolheu. Vazio quando nao escala.
+  motivo_curto: z
+    .string()
+    .max(300)
+    .describe("Quando escalar=true, o motivo em uma linha. Quando false, string vazia."),
 });
 
 export interface SupportResult {
@@ -167,7 +175,7 @@ export async function processSupportMessage(event: EventRow): Promise<SupportRes
         admin,
         threadId,
         event.organization_id,
-        gerado.motivo_curto ?? "a IA pediu ajuda de uma pessoa",
+        gerado.motivo_curto || "a IA pediu ajuda de uma pessoa",
       );
     } else {
       const { error: erroStatus } = await admin

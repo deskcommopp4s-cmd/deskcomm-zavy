@@ -48,28 +48,3 @@ export function promptDoSistemaDaConta(conta: ContaDoSuporte, nomeDaMarca: strin
     "marque escalar=true e escreva um motivo curto para quem vai assumir.",
   ].join("\n");
 }
-
-/**
- * O que o modelo devolve — tipado, para o worker nunca gravar texto solto nem
- * decidir escalada por heurística de palavra-chave.
- */
-export const ESQUEMA_DA_RESPOSTA = {
-  type: "object",
-  properties: {
-    resposta: {
-      type: "string",
-      description: "A resposta ao cliente, em português, direta e sem jargão.",
-    },
-    escalar: {
-      type: "boolean",
-      description:
-        "true quando uma pessoa da plataforma precisa assumir: pedido de mudança, dado que não está no retrato, reclamação, cobrança, ou dúvida que você não tem certeza.",
-    },
-    motivo_curto: {
-      type: "string",
-      description: "Quando escalar=true, o motivo em uma linha, para quem vai assumir.",
-    },
-  },
-  required: ["resposta", "escalar"],
-  additionalProperties: false,
-} as const;
