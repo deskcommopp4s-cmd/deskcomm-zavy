@@ -17,6 +17,7 @@ import { randomUUID } from "node:crypto";
 import { type NextRequest } from "next/server";
 
 import { fail, ok } from "@/lib/api/wrappers";
+import { checkRateLimit } from "@/lib/ai/dispatcher/rate-limit";
 import { requireSupportWrite } from "@/lib/impersonate/support";
 import { requireRole } from "@/lib/auth/require-role";
 import { traduzir } from "@/lib/i18n/dicionario";
@@ -60,6 +61,25 @@ export async function POST(req: NextRequest): Promise<Response> {
   const authz = await requireRole("agent", { requestId, resource: "support_threads" });
   if (!authz.ok) return authz.response;
   const t = (texto: string) => traduzir(texto, authz.user.idioma);
+
+  // ── O TETO DO "ABRIR CHAMADO" ──────────────────────────────────────────────
+  //
+  // Abrir chamado e raro: quem abre, abre um. O teto existe para o caso que nao
+  // e uso — um script, um bug de front em laco, alguem clicando 40 vezes. Sem
+  // ele, cada clique vira chamado na fila da plataforma E uma chamada de IA
+  // (o gatilho acorda a IA em toda mensagem de cliente).
+  //
+  // 5 por 10 min por USUARIO, nao por IP: a chave e a pessoa autenticada, e
+  // duas pessoas atras do mesmo NAT nao competem entre si.
+  const rl = await checkRateLimit(`support_open:${authz.user.id}`, 5, 600);
+  if (!rl.allowed) {
+    return fail(
+      "rate_limited",
+      t("Você abriu muitos chamados seguidos. Tente de novo em alguns minutos."),
+      429,
+      { requestId, headers: { "Retry-After": "600" } },
+    );
+  }
 
   const parsed = abrirChamadoSchema.safeParse(await req.json().catch(() => null));
   if (!parsed.success) {

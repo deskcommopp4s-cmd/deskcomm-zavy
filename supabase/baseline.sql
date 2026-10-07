@@ -26868,6 +26868,26 @@ create trigger trg_support_message_acorda_a_ia
   after insert on public.support_messages
   for each row execute function public.fn_support_message_acorda_a_ia();
 
+-- ---- bucket dos anexos do suporte (migration 0272) ----
+-- Bucket PROPRIO: `whatsapp-media` e midia de conversa com o contato do cliente;
+-- aqui e o anexo do chamado para a plataforma. Ciclos de vida diferentes.
+-- Escrita so pelo `service_role` (a rota valida tipo e tamanho antes de subir);
+-- leitura por organizacao do path.
+insert into storage.buckets (id, name, public, file_size_limit)
+values ('support-media', 'support-media', false, 52428800)
+on conflict (id) do nothing;
+
+drop policy if exists "support_media_read" on storage.objects;
+create policy "support_media_read" on storage.objects for select to authenticated
+  using (
+    bucket_id = 'support-media'
+    and exists (
+      select 1 from public.user_organizations uo
+      where uo.user_id = auth.uid() and uo.revoked_at is null
+        and uo.organization_id = (split_part(name, '/', 1))::uuid
+    )
+  );
+
 -- ---- VARREDURA anon: função nova nasce exposta em quem ATUALIZA (migration 0116) ----
 --
 -- ⚠️ ESTE BLOCO É, DE PROPÓSITO, O ÚLTIMO DO ARQUIVO. Apêndice novo entra ANTES

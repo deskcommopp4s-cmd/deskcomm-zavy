@@ -38,6 +38,10 @@ interface Mensagem {
   author_kind: "usuario" | "ia" | "humano";
   body: string | null;
   created_at: string;
+  /** URL assinada do anexo (o bucket é privado). `null` quando não há mídia. */
+  media_url?: string | null;
+  media_mime?: string | null;
+  media_name?: string | null;
 }
 
 /** O rótulo do autor. `ia` e `humano` são a PLATAFORMA respondendo. */
@@ -141,6 +145,34 @@ export function ChatDeSuporte() {
     }
   }
 
+  /**
+   * Anexar manda o arquivo pela ROTA, não direto no bucket: o bucket não tem
+   * policy de escrita (de propósito), e é a rota que valida tipo e tamanho e
+   * confere que o chamado é seu. A resposta do servidor é o que decide — o
+   * navegador não sabe o que o servidor aceita.
+   */
+  async function anexar(arquivo: File) {
+    if (!aberto) return;
+    setEnviando(true);
+    try {
+      const form = new FormData();
+      form.append("file", arquivo);
+      const res = await fetch(`/api/v1/support/threads/${aberto}/attachments`, {
+        method: "POST",
+        body: form,
+      });
+      const json = await res.json().catch(() => null);
+      if (!res.ok) {
+        toast.error(json?.error?.message ? t(json.error.message) : t("Não consegui enviar."));
+        return;
+      }
+      await carregarMensagens(aberto);
+      await carregarChamados();
+    } finally {
+      setEnviando(false);
+    }
+  }
+
   async function fechar(nota: number | null) {
     if (!aberto) return;
     const res = await fetch(`/api/v1/support/threads/${aberto}/close`, {
@@ -209,6 +241,29 @@ export function ChatDeSuporte() {
                   <div key={m.id} className="text-sm" data-testid={`mensagem-${m.id}`}>
                     <span className="font-medium">{t(ROTULO_DO_AUTOR[m.author_kind])}</span>
                     <p className="whitespace-pre-wrap break-words">{m.body}</p>
+                    {/* Imagem abre inline; o resto vira link. `media_mime` decide,
+                        não a extensão — o servidor gravou o mime que recebeu. */}
+                    {m.media_url ? (
+                      m.media_mime?.startsWith("image/") ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={m.media_url}
+                          alt={m.media_name ?? t("Anexo")}
+                          className="mt-1 max-h-64 rounded-md border"
+                          data-testid={`anexo-${m.id}`}
+                        />
+                      ) : (
+                        <a
+                          href={m.media_url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="mt-1 inline-block text-xs underline"
+                          data-testid={`anexo-${m.id}`}
+                        >
+                          {m.media_name ?? t("Anexo")}
+                        </a>
+                      )
+                    ) : null}
                   </div>
                 ))}
               </div>
@@ -225,10 +280,25 @@ export function ChatDeSuporte() {
                     onChange={(e) => setRascunho(e.target.value)}
                     data-testid="campo-de-resposta"
                   />
-                  <div className="mt-2 flex gap-2">
+                  <div className="mt-2 flex items-center gap-2">
                     <Button size="sm" disabled={enviando} onClick={() => void responder()} data-testid="responder">
                       {t("Enviar")}
                     </Button>
+                    {/* O `value` é limpo no onChange para o MESMO arquivo poder
+                        ser reenviado (o input não dispara change se o valor não
+                        muda — e a pessoa tentando de novo acharia que travou). */}
+                    <input
+                      type="file"
+                      disabled={enviando}
+                      aria-label={t("Anexar arquivo")}
+                      data-testid="anexar-arquivo"
+                      className="text-xs"
+                      onChange={(e) => {
+                        const f = e.target.files?.[0];
+                        if (f) void anexar(f);
+                        e.target.value = "";
+                      }}
+                    />
                     <Button
                       size="sm"
                       variant="outline"
