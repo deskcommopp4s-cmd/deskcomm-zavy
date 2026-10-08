@@ -351,10 +351,10 @@ as $$
   select count(*)::int from expirados;
 $$;
 
-revoke all on function public.fn_reaper_campaign_recipients(smallint)
+revoke all on function public.fn_reaper_campaign_recipients(int)
   from public, anon, authenticated;
 
-comment on function public.fn_reaper_campaign_recipients(smallint) is
+comment on function public.fn_reaper_campaign_recipients(int) is
   'Devolve à fila o destinatário cujo lease expirou. A idempotência do envio é o sink (chave campaign_id+recipient_id+step_order), que reconcilia por messages.metadata.idempotency_key antes de reenviar.';
 
 -- ============================================================================
