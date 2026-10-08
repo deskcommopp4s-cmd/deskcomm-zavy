@@ -10,6 +10,7 @@ import type { NextRequest } from "next/server";
 
 import { fail, ok } from "@/lib/api/wrappers";
 import { requireRole } from "@/lib/auth/require-role";
+import { rotuloDoContato } from "@/lib/contacts/rotulo-do-contato";
 import { createClient } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
@@ -84,7 +85,9 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<R
           attempts: d.attempts,
           last_error: d.last_error,
           last_sent_at: d.last_sent_at,
-          nome: c?.display_name ?? c?.phone_number ?? "—",
+          // O rótulo canônico do contato (nome → telefone → "Sem nome"), nunca
+          // a cadeia à mão — a catraca `rotulo-do-contato` existe para isso.
+          nome: rotuloDoContato(c ?? null),
         };
       }),
       contadores: {
