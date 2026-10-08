@@ -164,6 +164,12 @@ describe("a sétima cópia não nasce", () => {
         "nome da ORGANIZAÇÃO no retrato da conta que a IA de suporte recebe; não é contato e não decide o nome exibido de ninguém",
     },
     {
+      arquivo: "app/app/campaigns/_components/Campanhas.tsx",
+      trecho: "{con.display_name ?? con.phone_number ?? con.id.slice(0, 8)}",
+      motivo:
+        "rótulo da CONEXÃO (channel_session) na lista da tela de campanha — display_name do número ou o phone; não é o nome de um contato e não decide nome exibido de ninguém",
+    },
+    {
       arquivo: "app/api/v1/channels/official/route.ts",
       trecho: "displayName: data?.display_name ?? null,",
       motivo: "nome do NÚMERO no canal oficial da Meta, não de contato",
