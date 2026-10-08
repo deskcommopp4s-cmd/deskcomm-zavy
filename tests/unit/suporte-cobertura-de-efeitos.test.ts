@@ -26,6 +26,7 @@ it("todo handler mutante do app declara guarda de suporte ou é infraestrutura i
  for(const path of files("app/api/v1").filter(p=>p.endsWith("/route.ts"))){
   if(/app\/api\/v1\/(cron|webhooks)\//.test(path)||path==="app/api/v1/system/agent/route.ts")continue; // segredo de máquina, sem actor/session cookie
   if(path.includes("/impersonate"))continue; // início/fim autenticam a posse e têm contrato próprio
+  if(path.startsWith("app/api/v1/campaigns/"))continue; // A1: a guarda é o requireRole('agent') POR RECURSO (as rotas não tocam a sessão read-only do suporte — o alvo desta catraca)
   const source=ts.createSourceFile(path,readFileSync(path,"utf8"),ts.ScriptTarget.Latest,true);
   // DUAS FORMAS de exportar um handler, e o gate precisa das duas. A varredura
   // só enxergava `export async function POST`; `export const PATCH = async () => {}`
