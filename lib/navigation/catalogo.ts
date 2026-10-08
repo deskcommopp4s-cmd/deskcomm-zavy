@@ -121,6 +121,14 @@ export const NAV_CATALOG = [
     sidebar: true,
   },
   {
+    href: "/app/campaigns",
+    label: "Campanhas",
+    description: "Disparos em massa para a sua base — sequência, agendamento e acompanhamento no mesmo lugar.",
+    icon: "Megaphone",
+    group: "atendimento",
+    sidebar: true,
+  },
+  {
     // Entra em "atendimento", e não em "organizacao", porque a Agenda é onde o
     // dia acontece e não onde ele se configura: quem atende abre isto de manhã
     // junto com o Inbox. Os TIPOS de agendamento — que são configuração de

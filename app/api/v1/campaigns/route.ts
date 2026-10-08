@@ -16,6 +16,28 @@ import { createClient } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
 
+/**
+ * GET — a lista de campanhas da organização (a tela de acompanhamento).
+ * A RLS filtra por org; o papel vem do requireRole.
+ */
+export async function GET(req: NextRequest): Promise<Response> {
+  const requestId = randomUUID();
+  const authz = await requireRole("agent", { requestId, resource: "campaigns" });
+  if (!authz.ok) return authz.response;
+
+  const supabase = await createClient();
+  const { data: campanhas, error } = await supabase
+    .from("campaigns")
+    .select(
+      "id, name, status, total_recipients, sent_count, failed_count, delivered_count, read_count, replied_count, created_at, window_start_hour, window_end_hour",
+    )
+    .eq("organization_id", authz.org.orgId)
+    .order("created_at", { ascending: false })
+    .limit(200);
+  if (error) return fail("internal_error", "Não consegui listar as campanhas.", 500, { requestId });
+  return ok(campanhas ?? [], { requestId });
+}
+
 export async function POST(req: NextRequest): Promise<Response> {
   const requestId = randomUUID();
   const authz = await requireRole("agent", { requestId, resource: "campaigns" });
