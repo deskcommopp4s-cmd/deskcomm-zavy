@@ -936,6 +936,32 @@ async function handleAck(admin: Admin, session: Session, p: WahaPayload): Promis
     .update(update)
     .eq("organization_id", session.organization_id)
     .in("external_id", candidates);
+
+  // ── O INSTANTE DO PRIMEIRO ACK (a camada 3 do freio da campanha) ─────────
+  //
+  // `messages.ack` é o NÍVEL (0-3); o freio de ban silencioso precisa do
+  // INSTANTE em que o servidor aceitou (ack>=1). Medido: sem `ack_at`, a camada
+  // 3 da campanha não tem como medir "N mensagens em M minutos sem ack".
+  // Condição `ack_at is null`: só o PRIMEIRO ack grava — a repetição do mesmo
+  // ack não apaga o instante.
+  if (ack >= 1) {
+    const { data: comAck } = await admin
+      .from("messages")
+      .update({ ack_at: now })
+      .eq("organization_id", session.organization_id)
+      .in("external_id", candidates)
+      .is("ack_at", null)
+      .select("id");
+    if (comAck && comAck.length > 0) {
+      // O espelho na campanha: o dispatch (destinatário × passo) liga por
+      // outbound_message_id à message que recebeu o ack.
+      await admin
+        .from("campaign_step_dispatches")
+        .update({ ack_at: now })
+        .in("outbound_message_id", comAck.map((m) => m.id as string))
+        .is("ack_at", null);
+    }
+  }
 }
 
 interface SessionStatusRow extends Session {

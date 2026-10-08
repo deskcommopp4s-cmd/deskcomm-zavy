@@ -35,7 +35,44 @@ export async function GET(req: NextRequest): Promise<Response> {
     .order("created_at", { ascending: false })
     .limit(200);
   if (error) return fail("internal_error", "Não consegui listar as campanhas.", 500, { requestId });
-  return ok(campanhas ?? [], { requestId });
+
+  // ── MÉTRICAS reais (Fase 3): entregue/lido vêm da FONTE (messages), não dos
+  // contadores da ficha. O dispatch liga o envio à linha de messages
+  // (outbound_message_id); delivered/read é um fato de messages. `respondeu`
+  // vem do marcos do recipient (replied_at).
+  const ids = (campanhas ?? []).map((c) => c.id as string);
+  let metricas: Record<string, { delivered: number; read: number; replied: number }> = {};
+  if (ids.length > 0) {
+    const { data: agregado } = await supabase
+      .from("campaign_recipients")
+      .select(
+        "campaign_id, campaign_step_dispatches!inner(outbound_message_id, messages!inner(delivered_at, read_at)), replied_at",
+      )
+      .in("campaign_id", ids);
+    // O Supabase JS não agrega; conta-se aqui (lista por campanha é curta).
+    metricas = {};
+    for (const row of (agregado ?? []) as unknown as Array<{
+      campaign_id: string;
+      replied_at: string | null;
+      campaign_step_dispatches?: Array<{
+        messages?: { delivered_at: string | null; read_at: string | null } | null;
+      }>;
+    }>) {
+      const m = metricas[row.campaign_id] ?? { delivered: 0, read: 0, replied: 0 };
+      if (row.replied_at) m.replied += 1;
+      const dispatch = row.campaign_step_dispatches?.[0];
+      if (dispatch?.messages?.delivered_at) m.delivered += 1;
+      if (dispatch?.messages?.read_at) m.read += 1;
+      metricas[row.campaign_id] = m;
+    }
+  }
+
+  const comMetricas = (campanhas ?? []).map((c) => {
+    const m = metricas[c.id as string] ?? { delivered: 0, read: 0, replied: 0 };
+    return { ...c, delivered_count: m.delivered, read_count: m.read, replied_count: m.replied };
+  });
+
+  return ok(comMetricas, { requestId });
 }
 
 export async function POST(req: NextRequest): Promise<Response> {

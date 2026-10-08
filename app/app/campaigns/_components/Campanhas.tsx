@@ -17,6 +17,9 @@ interface Campanha {
   total_recipients: number;
   sent_count: number;
   failed_count: number;
+  delivered_count: number;
+  read_count: number;
+  replied_count: number;
 }
 
 interface Conexao {
@@ -167,6 +170,27 @@ export function Campanhas() {
       .filter((c) => c.teto !== null);
   }, [conexoes, sessoes, tetoDiario]);
 
+  async function pausar(campanha: Campanha) {
+    const resposta = window.confirm(t("Pausar a campanha não volta sozinha. Continuar?"));
+    if (!resposta) return;
+    try {
+      const res = await fetch(`/api/v1/campaigns/${campanha.id}/pause`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ motivo: t("Pausa manual") }),
+      });
+      const json = await res.json().catch(() => null);
+      if (!res.ok) {
+        toast.error(json?.error?.message ? t(json.error.message) : t("Não consegui pausar a campanha."));
+        return;
+      }
+      toast.success(t("Campanha pausada."));
+      await carregar();
+    } catch {
+      toast.error(t("Não consegui pausar a campanha."));
+    }
+  }
+
   async function criarEDisparar() {
     if (!podeRevisar) return;
     setEnviando(true);
@@ -268,7 +292,20 @@ export function Campanhas() {
                   <span>
                     {c.sent_count}/{c.total_recipients} {t("enviadas")}
                   </span>
+                  <span title={t("Entregues")}>{c.delivered_count} {t("entregues")}</span>
+                  <span title={t("Lidas")}>{c.read_count} {t("lidas")}</span>
+                  <span title={t("Respostas")}>{c.replied_count} {t("respostas")}</span>
                   {c.failed_count > 0 && <span className="text-destructive">⚠ {c.failed_count}</span>}
+                  {(c.status === "ativa" || c.status === "agendada") && (
+                    <button
+                      type="button"
+                      className="text-xs underline"
+                      onClick={() => void pausar(c)}
+                      data-testid={`pausar-${c.id}`}
+                    >
+                      {t("Pausar")}
+                    </button>
+                  )}
                 </span>
               </li>
             ))}

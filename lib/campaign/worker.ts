@@ -43,6 +43,7 @@ import { decidePacing } from "@/lib/agent-engine/pacing/engine";
 import { loadPacingState } from "@/lib/agent-engine/pacing/store";
 import { loadEnv } from "@/lib/agent-engine/env";
 import { PACING_DEFAULTS } from "@/lib/agent-engine/pacing/defaults";
+import { avaliarFreioDasCampanhasAtivas } from "@/lib/campaign/breaker";
 
 export const CAMPAIGN_TICK_LIMIT = 50;
 export const CAMPAIGN_LEASE_SECONDS = 120;
@@ -69,6 +70,18 @@ export async function tickCampanhas(pool: pg.Pool, now: Date = new Date()): Prom
   const knobs = PACING_DEFAULTS;
 
   const resultado: TickResult = { reclamados: 0, enviados: 0, reagendados: 0, erros: 0 };
+
+  // ── O FREIO (Fase 3): antes de tocar em QUALQUER destinatário ─────────────
+  // Pausa as campanhas ativas sob um gatilho de ban (conexao caiu / falhas em
+  // serie / ban silencioso). A pausa NAO volta sozinha: auto_paused + motivo.
+  const freio = await avaliarFreioDasCampanhasAtivas(pool, now);
+  if (freio.pausadas > 0) {
+    log.warn("[campaign.worker] freio pausou campanhas", {
+      pausadas: freio.pausadas,
+      camada: freio.camada,
+      motivo: freio.motivo,
+    });
+  }
 
   // ── 1. CLAIM ATÔMICO COM LEASE ──────────────────────────────────────────
   // A condição de lease vai repetida no WHERE do UPDATE (lição da 0146) —
