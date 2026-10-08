@@ -466,6 +466,8 @@ export const DICIONARIO: Traducoes = {
   "Pausa manual": { es: "Pausa manual" },
   "Não consegui pausar a campanha.": { es: "No pude pausar la campaña." },
   "Campanha pausada.": { es: "Campaña pausada." },
+  "Não consegui retomar a campanha.": { es: "No pude reanudar la campaña." },
+  "Campanha retomada.": { es: "Campaña reanudada." },
   "Entregues": { es: "Entregadas" },
   "entregues": { es: "entregadas" },
   "Lidas": { es: "Leídas" },
