@@ -373,7 +373,7 @@ export function Campanhas() {
     }
   }
 
-  async function pausar(campanha: Campanha) {
+  async function pausar(campanha: { id: string }) {
     if (!window.confirm(t("Pausar a campanha não volta sozinha. Continuar?"))) return;
     try {
       const res = await fetch(`/api/v1/campaigns/${campanha.id}/pause`, {
@@ -387,9 +387,28 @@ export function Campanhas() {
         return;
       }
       toast.success(t("Campanha pausada."));
+      setDetalhe((d) => (d && d.campanha.id === campanha.id ? { ...d, campanha: { ...d.campanha, status: "pausada" } } : d));
       await carregar();
     } catch {
       toast.error(t("Não consegui pausar a campanha."));
+    }
+  }
+
+  // Retomar só existe para quem foi pausada (pausa não volta sozinha). Retomada a
+  // campanha, o worker segue do ponto em que parou — os pendentes continuam pendentes.
+  async function retomar(campanha: { id: string }) {
+    try {
+      const res = await fetch(`/api/v1/campaigns/${campanha.id}/resume`, { method: "POST" });
+      const json = await res.json().catch(() => null);
+      if (!res.ok) {
+        toast.error(json?.error?.message ? t(json.error.message) : t("Não consegui retomar a campanha."));
+        return;
+      }
+      toast.success(t("Campanha retomada."));
+      setDetalhe((d) => (d && d.campanha.id === campanha.id ? { ...d, campanha: { ...d.campanha, status: "ativa" } } : d));
+      await carregar();
+    } catch {
+      toast.error(t("Não consegui retomar a campanha."));
     }
   }
 
@@ -773,6 +792,18 @@ export function Campanhas() {
                     ⚠ {t("Pausada automaticamente")}: {detalhe.campanha.paused_reason}
                     {detalhe.campanha.breaker_layer ? ` (${t("camada")} ${detalhe.campanha.breaker_layer})` : ""}
                   </span>
+                )}
+                {/* Ações da campanha no próprio detalhe: sem isto, clicar na campanha
+                    só mostrava números — não dava para pausar nem retomar. */}
+                {detalhe.campanha.status === "ativa" && (
+                  <Button variant="outline" size="sm" onClick={() => pausar(detalhe.campanha)}>
+                    {t("Pausar")}
+                  </Button>
+                )}
+                {detalhe.campanha.status === "pausada" && (
+                  <Button variant="outline" size="sm" onClick={() => retomar(detalhe.campanha)}>
+                    {t("Retomar")}
+                  </Button>
                 )}
               </div>
 
