@@ -21,7 +21,6 @@ interface Campanha {
 
 interface Conexao {
   id: string;
-  waha_session_name: string | null;
   display_name: string | null;
   phone_number: string | null;
   status: string | null;
