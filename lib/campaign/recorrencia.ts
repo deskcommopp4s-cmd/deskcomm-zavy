@@ -140,7 +140,7 @@ export function proximoDisparo(
       let incrementoMs = n * MS_DIA;
       if (unidade === "semana") incrementoMs = n * MS_SEMANA;
       if (unidade === "mes") {
-        let m = new Date(Date.UTC(base.getUTCFullYear(), base.getUTCMonth() + n, 1));
+        const m = new Date(Date.UTC(base.getUTCFullYear(), base.getUTCMonth() + n, 1));
         return proximaHoraDoDia(m, hora, minuto);
       }
       const candidato = proximaHoraDoDia(new Date(base.getTime() + incrementoMs), hora, minuto);
