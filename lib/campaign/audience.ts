@@ -133,16 +133,27 @@ export async function materializarPublico(
   }
 
   // INSERT BULK com on conflict do nothing — idempotente e sem duplicar.
+  // 7 colunas, 7 expressões por tupla. $1 (org) e $2 (campanha) são fixos;
+  // cada linha consome 5 parâmetros (contact_id, session, conversa, status,
+  // next_send_at) — o `base` anda de 5 em 5. O erro anterior ("INSERT has more
+  // target columns than expressions") era exatamente este desalinhamento: 7
+  // colunas contra 6 placeholders.
   const values: unknown[] = [];
   const placeholders: string[] = [];
+  const agoraIso = new Date().toISOString();
   linhas.forEach((linha, i) => {
-    const base = i * 4;
-    // ULID-style: único por org (o campaign_id garante a partição)
-    placeholders.push(`($1, $2, $${base + 3}, $${base + 4}, $${base + 5}, $${base + 6})`);
-    values.push(linha.contact_id, linha.channel_session_id, linha.conversation_id, "pendente", new Date().toISOString());
+    const b = i * 5;
+    placeholders.push(`($1, $2, $${b + 3}, $${b + 4}, $${b + 5}, $${b + 6}, $${b + 7})`);
+    values.push(
+      linha.contact_id,
+      linha.channel_session_id,
+      linha.conversation_id,
+      "pendente",
+      agoraIso,
+    );
   });
 
-  // FIXME: para muitos contatos isso vira um VALUES gigante; Fase 2 usa batch
+  // FIXME: para muitos contatos isso vira um VALUES gigante; a Fase 2 usa lote
   // de 500/1000. Aqui segue simples e correto.
   const resultado = await pool.query(
     `insert into public.campaign_recipients
