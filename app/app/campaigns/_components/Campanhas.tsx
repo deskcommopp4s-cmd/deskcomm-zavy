@@ -34,6 +34,11 @@ interface Conexao {
   daily_message_limit: number | null;
 }
 
+interface Etiqueta {
+  tag: string;
+  uso_em_contatos: number;
+}
+
 interface Passo {
   body: string;
   media_storage_path?: string;
@@ -82,7 +87,7 @@ export function Campanhas() {
   const t = useT();
   const [campanhas, setCampanhas] = useState<Campanha[]>([]);
   const [conexoes, setConexoes] = useState<Conexao[]>([]);
-  const [etiquetas, setEtiquetas] = useState<string[]>([]);
+  const [etiquetas, setEtiquetas] = useState<Etiqueta[]>([]);
   const [buscaEtiqueta, setBuscaEtiqueta] = useState("");
   const [previa, setPrevia] = useState<number | null>(null);
   const [carregando, setCarregando] = useState(true);
@@ -126,7 +131,7 @@ export function Campanhas() {
       ]);
       if (rCamp.ok) setCampanhas(lerLista<Campanha>(camp));
       if (rConex.ok) setConexoes(lerLista<Conexao>(conex).filter((c) => c.status !== "disconnected"));
-      if (rTags.ok) setEtiquetas(lerLista<string>(tags));
+      if (rTags.ok) setEtiquetas(lerLista<Etiqueta>(tags));
     } finally {
       setCarregando(false);
     }
@@ -219,7 +224,9 @@ export function Campanhas() {
 
   const etiquetasFiltradas = useMemo(
     () =>
-      etiquetas.filter((e) => e.toLowerCase().includes(buscaEtiqueta.trim().toLowerCase())).slice(0, 100),
+      etiquetas
+        .filter((e) => e.tag.toLowerCase().includes(buscaEtiqueta.trim().toLowerCase()))
+        .slice(0, 100),
     [etiquetas, buscaEtiqueta],
   );
 
@@ -457,10 +464,13 @@ export function Campanhas() {
                   {etiquetasFiltradas.length === 0 ? (
                     <p className="text-xs text-muted-foreground">{t("Nenhuma etiqueta encontrada.")}</p>
                   ) : (
-                    etiquetasFiltradas.map((tag) => (
-                      <label key={tag} className="flex items-center gap-2 text-sm">
-                        <input type="checkbox" checked={etiquetasSelecionadas.includes(tag)} onChange={() => alternarEtiqueta(tag)} data-testid={`etiqueta-${tag}`} />
-                        <span>{tag}</span>
+                    etiquetasFiltradas.map((e) => (
+                      <label key={e.tag} className="flex items-center justify-between gap-2 text-sm">
+                        <span className="flex items-center gap-2">
+                          <input type="checkbox" checked={etiquetasSelecionadas.includes(e.tag)} onChange={() => alternarEtiqueta(e.tag)} data-testid={`etiqueta-${e.tag}`} />
+                          <span>{e.tag}</span>
+                        </span>
+                        <span className="text-xs text-muted-foreground">{e.uso_em_contatos}</span>
                       </label>
                     ))
                   )}

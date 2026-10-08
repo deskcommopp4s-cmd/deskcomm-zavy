@@ -22,12 +22,19 @@ export async function GET(req: NextRequest): Promise<Response> {
   const requestId = randomUUID();
   const authz = await requireRole("agent", { requestId, resource: "contacts" });
   if (!authz.ok) return authz.response;
-  const { rows } = await pool().query<{ tag: string }>(
-    `select distinct unnest(tags) as tag
-       from public.contacts
-      where organization_id = $1 and tags is not null
-      order by 1`,
+  // O MESMO vocabulário que Configurações → Tags usa (`fn_vocabulario_de_tags`).
+  // Antes esta rota lia só `contacts.tags` — e os dois eixos divergiam: uma
+  // etiqueta criada/visível numa tela não aparecia na outra. Medido: a tela de
+  // Tags lê a fn; a campanha lia os contatos.
+  const { rows } = await pool().query<{ tag: string; uso_em_contatos: string }>(
+    `select tag, uso_em_contatos::text
+       from public.fn_vocabulario_de_tags($1)
+      order by uso_em_contatos desc, tag
+      limit 500`,
     [authz.org.orgId],
   );
-  return ok(rows.map((r) => r.tag), { requestId });
+  return ok(
+    rows.map((r) => ({ tag: r.tag, uso_em_contatos: Number(r.uso_em_contatos) })),
+    { requestId },
+  );
 }
