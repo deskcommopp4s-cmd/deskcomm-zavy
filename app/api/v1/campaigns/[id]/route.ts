@@ -11,6 +11,8 @@ import type { NextRequest } from "next/server";
 import { fail, ok } from "@/lib/api/wrappers";
 import { requireRole } from "@/lib/auth/require-role";
 import { rotuloDoContato } from "@/lib/contacts/rotulo-do-contato";
+import { traduzir } from "@/lib/i18n/dicionario";
+import { criarCampanhaSchema, mensagemDaValidacao } from "@/lib/schemas/campanha";
 import { createClient } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
@@ -30,7 +32,10 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<R
   const { data: campanha } = await supabase
     .from("campaigns")
     .select(
-      "id, name, status, auto_paused, paused_reason, breaker_layer, paused_at, total_recipients, sent_count, failed_count, window_start_hour, window_end_hour, allowed_weekdays, scheduled_at, ai_variation, created_at",
+      // Os campos de CONFIGURAÇÃO vão junto: o mesmo GET alimenta o modo edição
+      // (o formulário precisa de nome, conexões, público, passos, janela, teto,
+      // variação por IA e agendamento/recorrência para reabrir preenchido).
+      "id, name, status, auto_paused, paused_reason, breaker_layer, paused_at, total_recipients, sent_count, failed_count, channel_session_ids, new_lead_strategy, new_lead_session_id, daily_limit, window_start_hour, window_end_hour, allowed_weekdays, audience, schedule_kind, scheduled_at, recurrence, ai_variation, created_at",
     )
     .eq("id", id)
     .eq("organization_id", authz.org.orgId)
@@ -39,7 +44,7 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<R
 
   const { data: passos } = await supabase
     .from("campaign_steps")
-    .select("step_order, body, media_kind, media_name:media_storage_path, delay_after_seconds")
+    .select("step_order, body, media_kind, media_storage_path, media_mime, media_name:media_storage_path, delay_after_seconds")
     .eq("campaign_id", id)
     .eq("organization_id", authz.org.orgId)
     .order("step_order", { ascending: true });
@@ -98,4 +103,106 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<R
     },
     { requestId },
   );
+}
+
+/**
+ * PUT /api/v1/campaigns/[id] — salva a edição de uma campanha EM RASCUNHO.
+ *
+ * Aceita o MESMO payload do POST (a tela reusa o formulário inteiro: nome,
+ * conexões, público, passos, janela, teto, variação por IA, agendamento e
+ * recorrência). Só rascunho: uma campanha ativa/pausada já tem público
+ * materializado — mexer nos passos no meio do disparo é outro problema (o
+ * caminho é pausar/retomar, ou um novo disparo).
+ *
+ * Conexões e passos são REESCRITOS (delete + insert): a lista do formulário é a
+ * fonte de verdade, e editar um passo é substituir o conjunto, não remendar.
+ */
+export async function PUT(req: NextRequest, { params }: RouteParams): Promise<Response> {
+  const requestId = randomUUID();
+  const authz = await requireRole("agent", { requestId, resource: "campaigns" });
+  if (!authz.ok) return authz.response;
+  const t = (texto: string) => traduzir(texto, authz.user.idioma);
+  const { id } = await params;
+
+  const parsed = criarCampanhaSchema.safeParse(await req.json().catch(() => null));
+  if (!parsed.success) {
+    return fail("validation_failed", mensagemDaValidacao(parsed.error), 422, { requestId });
+  }
+  const dados = parsed.data;
+
+  const supabase = await createClient();
+
+  const { data: atual } = await supabase
+    .from("campaigns")
+    .select("id, status")
+    .eq("id", id)
+    .eq("organization_id", authz.org.orgId)
+    .maybeSingle();
+  if (!atual) return fail("not_found", "Campanha não encontrada.", 404, { requestId });
+  if (atual.status !== "rascunho") {
+    return fail("validation_failed", "Só é possível editar uma campanha em rascunho.", 409, { requestId });
+  }
+
+  const { error: erroCampanha } = await supabase
+    .from("campaigns")
+    .update({
+      name: dados.name,
+      channel_session_ids: dados.channel_session_ids,
+      new_lead_strategy: dados.new_lead_strategy,
+      new_lead_session_id: dados.new_lead_session_id ?? null,
+      daily_limit: dados.daily_limit ?? null,
+      window_start_hour: dados.window_start_hour ?? 8,
+      window_end_hour: dados.window_end_hour ?? 20,
+      allowed_weekdays: dados.allowed_weekdays ?? [1, 2, 3, 4, 5],
+      audience: dados.audience as never,
+      ai_variation: dados.ai_variation ?? false,
+      schedule_kind: dados.schedule_kind ?? "agora",
+      scheduled_at: dados.scheduled_at ?? null,
+      recurrence: (dados.recurrence ?? null) as never,
+      uses_official: false, // recalculado no activate, a partir das conexões
+    })
+    .eq("id", id)
+    .eq("organization_id", authz.org.orgId);
+  if (erroCampanha) {
+    return fail("internal_error", t("Não consegui salvar a campanha."), 500, { requestId });
+  }
+
+  const { error: erroLimpaCanais } = await supabase
+    .from("campaign_channels")
+    .delete()
+    .eq("campaign_id", id)
+    .eq("organization_id", authz.org.orgId);
+  if (erroLimpaCanais) {
+    return fail("internal_error", t("Não consegui salvar as conexões."), 500, { requestId });
+  }
+  const canais = dados.channel_session_ids.map((sid) => ({
+    organization_id: authz.org.orgId,
+    campaign_id: id,
+    channel_session_id: sid,
+  }));
+  const { error: erroCanais } = await supabase.from("campaign_channels").insert(canais);
+  if (erroCanais) return fail("internal_error", t("Não consegui salvar as conexões."), 500, { requestId });
+
+  const { error: erroLimpaPassos } = await supabase
+    .from("campaign_steps")
+    .delete()
+    .eq("campaign_id", id)
+    .eq("organization_id", authz.org.orgId);
+  if (erroLimpaPassos) {
+    return fail("internal_error", t("Não consegui salvar os passos."), 500, { requestId });
+  }
+  const passos = dados.steps.map((passo, i) => ({
+    organization_id: authz.org.orgId,
+    campaign_id: id,
+    step_order: i + 1,
+    body: passo.body ?? null,
+    media_kind: passo.media_kind ?? null,
+    media_storage_path: passo.media_storage_path ?? null,
+    media_mime: passo.media_mime ?? null,
+    delay_after_seconds: passo.delay_after_seconds ?? 0,
+  }));
+  const { error: erroPassos } = await supabase.from("campaign_steps").insert(passos);
+  if (erroPassos) return fail("internal_error", t("Não consegui salvar os passos."), 500, { requestId });
+
+  return ok({ id }, { requestId });
 }

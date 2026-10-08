@@ -40,8 +40,22 @@ interface DetalheDaCampanha {
     id: string; name: string; status: string; auto_paused: boolean;
     paused_reason: string | null; breaker_layer: number | null;
     total_recipients: number; sent_count: number; failed_count: number;
+    // Configuração — o MESMO GET alimenta o modo edição (o formulário reabre
+    // preenchido com estes campos).
+    channel_session_ids: string[] | null;
+    new_lead_strategy: string | null;
+    new_lead_session_id: string | null;
+    daily_limit: number | null;
+    window_start_hour: number | null;
+    window_end_hour: number | null;
+    allowed_weekdays: number[] | null;
+    audience: { tags?: string[] } | null;
+    ai_variation: boolean | null;
+    schedule_kind: string | null;
+    scheduled_at: string | null;
+    recurrence: unknown;
   };
-  passos: { step_order: number; body: string | null; media_kind: string | null; delay_after_seconds: number }[];
+  passos: { step_order: number; body: string | null; media_kind: string | null; media_storage_path?: string | null; media_mime?: string | null; media_name?: string | null; delay_after_seconds: number }[];
   destinatarios: { id: string; status: string; nome: string; current_step: number; attempts: number; last_error: string | null }[];
   contadores: { entregues: number; lidas: number; respondidos: number };
 }
@@ -80,6 +94,13 @@ const DIAS_DA_SEMANA: { valor: number; rotulo: string }[] = [
 ];
 
 type TipoRecorrencia = "semanal" | "mensal" | "dia_util" | "intervalo";
+
+/** Converte um ISO para o valor do input `datetime-local` (no fuso do navegador). */
+function paraInputLocal(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return new Date(d.getTime() - d.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
+}
 
 /** Lê o corpo de uma resposta que pode vir crua ou em `{ data: [...] }`. */
 function lerLista<T>(j: unknown): T[] {
@@ -130,6 +151,9 @@ export function Campanhas() {
   const [subindo, setSubindo] = useState<number | null>(null);
   const [detalhe, setDetalhe] = useState<DetalheDaCampanha | null>(null);
   const [abrindoDetalhe, setAbrindoDetalhe] = useState(false);
+  // Quando setado, o formulário do topo está em MODO EDIÇÃO (rascunho reaberto):
+  // o botão de revisão vira "Salvar alterações" e grava via PUT.
+  const [editandoId, setEditandoId] = useState<string | null>(null);
 
   const carregar = useCallback(async () => {
     try {
@@ -287,40 +311,59 @@ export function Campanhas() {
     };
   }
 
+  // O corpo do formulário — o MESMO para criar (POST) e para salvar a edição
+  // (PUT). O formulário inteiro é a fonte de verdade da campanha.
+  function montarCorpo() {
+    const steps = passos.map((p) => ({
+      body: p.body.trim() || null,
+      media_storage_path: p.media_storage_path ?? null,
+      media_kind: p.media_kind ?? null,
+      media_mime: p.media_mime ?? null,
+      delay_after_seconds: Number(p.delay_after_seconds || 0),
+    }));
+    return {
+      name: nome.trim(),
+      channel_session_ids: sessoes,
+      audience: etiquetasSelecionadas.length ? { tags: etiquetasSelecionadas } : {},
+      steps,
+      daily_limit: tetoDiario ? Number(tetoDiario) : null,
+      new_lead_strategy: novaEstrategia,
+      new_lead_session_id: novaEstrategia === "fixa" ? sessaoFixa : null,
+      ai_variation: variacaoIa,
+      window_start_hour: Number(horaInicio),
+      window_end_hour: Number(horaFim),
+      allowed_weekdays: dias,
+      ...(recorrente
+        ? { schedule_kind: "recorrente", recurrence: montarRecorrencia() }
+        : agendadoPara
+          ? { schedule_kind: "agendado", scheduled_at: new Date(agendadoPara).toISOString() }
+          : {}),
+    };
+  }
+
+  function limparForm() {
+    setNome("");
+    setSessoes([]);
+    setEtiquetasSelecionadas([]);
+    setPassos([{ body: "", delay_after_seconds: "" }]);
+    setTetoDiario("");
+    setAgendadoPara("");
+    setNovaEstrategia("rotacionar");
+    setSessaoFixa("");
+    setVariacaoIa(false);
+    setRecorrente(false);
+    setEditandoId(null);
+    setRevisando(false);
+  }
+
   async function criarEDisparar() {
     if (!podeRevisar) return;
     setEnviando(true);
     try {
-      const steps = passos.map((p) => ({
-        body: p.body.trim() || null,
-        media_storage_path: p.media_storage_path ?? null,
-        media_kind: p.media_kind ?? null,
-        media_mime: p.media_mime ?? null,
-        delay_after_seconds: Number(p.delay_after_seconds || 0),
-      }));
-      const corpo = {
-        name: nome.trim(),
-        channel_session_ids: sessoes,
-        audience: etiquetasSelecionadas.length ? { tags: etiquetasSelecionadas } : {},
-        steps,
-        daily_limit: tetoDiario ? Number(tetoDiario) : null,
-        new_lead_strategy: novaEstrategia,
-        new_lead_session_id: novaEstrategia === "fixa" ? sessaoFixa : null,
-        ai_variation: variacaoIa,
-        window_start_hour: Number(horaInicio),
-        window_end_hour: Number(horaFim),
-        allowed_weekdays: dias,
-        ...(recorrente
-          ? { schedule_kind: "recorrente", recurrence: montarRecorrencia() }
-          : agendadoPara
-            ? { schedule_kind: "agendado", scheduled_at: new Date(agendadoPara).toISOString() }
-            : {}),
-      };
-
       const criada = await fetch("/api/v1/campaigns", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify(corpo),
+        body: JSON.stringify(montarCorpo()),
       });
       const criadaJson = await criada.json().catch(() => null);
       if (!criada.ok) {
@@ -341,17 +384,7 @@ export function Campanhas() {
         return;
       }
       toast.success(recorrente ? t("Campanha recorrente programada.") : agendadoPara ? t("Campanha agendada.") : t("Campanha disparada."));
-      setNome("");
-      setSessoes([]);
-      setEtiquetasSelecionadas([]);
-      setPassos([{ body: "", delay_after_seconds: "" }]);
-      setTetoDiario("");
-      setAgendadoPara("");
-      setNovaEstrategia("rotacionar");
-      setSessaoFixa("");
-      setVariacaoIa(false);
-      setRecorrente(false);
-      setRevisando(false);
+      limparForm();
       await carregar();
     } finally {
       setEnviando(false);
@@ -412,6 +445,78 @@ export function Campanhas() {
     }
   }
 
+  // Reabre a campanha EM RASCUNHO no formulário com TODOS os campos — o usuário
+  // muda o que quiser e salva de volta (PUT). Rascunho: nada foi enviado ainda.
+  async function editar(campanha: { id: string }) {
+    setAbrindoDetalhe(true);
+    try {
+      const res = await fetch(`/api/v1/campaigns/${campanha.id}`);
+      const json = await res.json().catch(() => null);
+      if (!res.ok) {
+        toast.error(json?.error?.message ? t(json.error.message) : t("Não consegui abrir a campanha."));
+        return;
+      }
+      const d = (json?.data ?? null) as DetalheDaCampanha | null;
+      if (!d) return;
+      const c = d.campanha;
+      setNome(c.name ?? "");
+      setSessoes(c.channel_session_ids ?? []);
+      setEtiquetasSelecionadas(c.audience?.tags ?? []);
+      setPassos(
+        d.passos.length
+          ? d.passos.map((p) => ({
+              body: p.body ?? "",
+              delay_after_seconds: p.delay_after_seconds ? String(p.delay_after_seconds) : "",
+              media_kind: (p.media_kind as Passo["media_kind"]) ?? undefined,
+              media_storage_path: p.media_storage_path ?? undefined,
+              media_mime: p.media_mime ?? undefined,
+              media_name: p.media_name ?? undefined,
+            }))
+          : [{ body: "", delay_after_seconds: "" }],
+      );
+      setTetoDiario(c.daily_limit ? String(c.daily_limit) : "");
+      setHoraInicio(String(c.window_start_hour ?? 8));
+      setHoraFim(String(c.window_end_hour ?? 20));
+      setDias(c.allowed_weekdays ?? [1, 2, 3, 4, 5]);
+      setNovaEstrategia(c.new_lead_strategy === "fixa" ? "fixa" : "rotacionar");
+      setSessaoFixa(c.new_lead_session_id ?? "");
+      setVariacaoIa(Boolean(c.ai_variation));
+      setRecorrente(c.schedule_kind === "recorrente");
+      setAgendadoPara(
+        c.schedule_kind === "agendado" && c.scheduled_at ? paraInputLocal(c.scheduled_at) : "",
+      );
+      setEditandoId(campanha.id);
+      setRevisando(false);
+      setDetalhe(null);
+      toast.success(t("Campanha aberta para edição."));
+    } finally {
+      setAbrindoDetalhe(false);
+    }
+  }
+
+  // Salva o rascunho reaberto. NÃO dispara — o disparo é outro gesto (Ativar).
+  async function salvarEdicao() {
+    if (!podeRevisar || !editandoId) return;
+    setEnviando(true);
+    try {
+      const res = await fetch(`/api/v1/campaigns/${editandoId}`, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(montarCorpo()),
+      });
+      const json = await res.json().catch(() => null);
+      if (!res.ok) {
+        toast.error(json?.error?.message ? t(json.error.message) : t("Não consegui salvar a campanha."));
+        return;
+      }
+      toast.success(t("Alterações salvas."));
+      limparForm();
+      await carregar();
+    } finally {
+      setEnviando(false);
+    }
+  }
+
   const resumoPessoa = useMemo(() => {
     if (!podeRevisar) return null;
     return {
@@ -433,7 +538,20 @@ export function Campanhas() {
       <h1 className="text-xl font-semibold">{t("Campanhas")}</h1>
 
       <Card className="p-4" data-testid="formulario-campanha">
-        <h2 className="mb-3 text-sm font-medium">{t("Nova campanha")}</h2>
+        <h2 className="mb-3 text-sm font-medium">{editandoId ? t("Editando campanha") : t("Nova campanha")}</h2>
+        {editandoId && (
+          <div
+            className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-md border border-amber-500 p-2 text-sm"
+            data-testid="modo-edicao"
+          >
+            <span className="text-amber-600">
+              {t("Você está editando um rascunho. Salvar não dispara — o disparo é o botão Ativar.")}
+            </span>
+            <Button variant="outline" size="sm" onClick={limparForm}>
+              {t("Cancelar edição")}
+            </Button>
+          </div>
+        )}
         <div className="space-y-5">
           {/* 1 · NOME */}
           <div>
@@ -710,8 +828,12 @@ export function Campanhas() {
 
           {/* REVISÃO */}
           {!revisando ? (
-            <Button disabled={!podeRevisar || enviando} onClick={() => setRevisando(true)} data-testid="ir-para-revisao">
-              {t("Revisar")}
+            <Button
+              disabled={!podeRevisar || enviando}
+              onClick={() => (editandoId ? void salvarEdicao() : setRevisando(true))}
+              data-testid={editandoId ? "salvar-edicao" : "ir-para-revisao"}
+            >
+              {editandoId ? (enviando ? t("Salvando…") : t("Salvar alterações")) : t("Revisar")}
             </Button>
           ) : (
             <div className="rounded-md border p-3" data-testid="revisao">
@@ -803,6 +925,17 @@ export function Campanhas() {
                 {detalhe.campanha.status === "pausada" && (
                   <Button variant="outline" size="sm" onClick={() => retomar(detalhe.campanha)}>
                     {t("Retomar")}
+                  </Button>
+                )}
+                {detalhe.campanha.status === "rascunho" && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => void editar(detalhe.campanha)}
+                    disabled={abrindoDetalhe}
+                    data-testid="editar-campanha"
+                  >
+                    {t("Editar")}
                   </Button>
                 )}
               </div>
