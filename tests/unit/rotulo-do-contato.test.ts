@@ -170,6 +170,12 @@ describe("a sétima cópia não nasce", () => {
         "rótulo da CONEXÃO (channel_session) na lista da tela de campanha — display_name do número ou o phone; não é o nome de um contato e não decide nome exibido de ninguém",
     },
     {
+      arquivo: "app/app/campaigns/_components/Campanhas.tsx",
+      trecho: "rotulo: c.display_name ?? c.phone_number ?? c.id.slice(0, 8)",
+      motivo:
+        "O mesmo rótulo de CONEXÃO do resumo do teto na tela de campanha — display_name do número; não é o nome de um contato",
+    },
+    {
       arquivo: "app/api/v1/channels/official/route.ts",
       trecho: "displayName: data?.display_name ?? null,",
       motivo: "nome do NÚMERO no canal oficial da Meta, não de contato",

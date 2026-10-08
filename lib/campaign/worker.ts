@@ -125,6 +125,7 @@ async function processarUmDestinatario(
     body: string | null;
     media_storage_path: string | null;
     media_kind: string | null;
+    media_mime: string | null;
     delay_after_seconds: number;
   }>("select * from public.campaign_steps where campaign_id = $1 and step_order = $2", [
     r.campaign_id,
@@ -139,9 +140,8 @@ async function processarUmDestinatario(
     );
     return "reagendado";
   }
-  if (!step.body || step.body.trim() === "") {
-    // Fase 1 envia TEXTO. Passo de mídia (imagem/documento/voz) é Fase 2.
-    throw new Error(`passo ${r.current_step} sem texto — mídia é da Fase 2`);
+  if ((!step.body || step.body.trim() === "") && !step.media_storage_path) {
+    throw new Error(`passo ${r.current_step} sem texto e sem mídia`);
   }
 
   // ── A campanha (janela + teto) ──────────────────────────────────────────
@@ -226,7 +226,11 @@ async function processarUmDestinatario(
     jobId: dispatchId,
     seq: r.current_step + 1,
     conversationId,
-    body: step.body,
+    body: step.body ?? "",
+    // Mídia do passo (imagem/documento/voz) — Fase 2. O path é asset da CAMPANHA
+    // (`{org}/campaigns/...`); o gate isMediaPathOwnedBy aceita da mesma org.
+    media_storage_path: step.media_storage_path ?? undefined,
+    media_mime: step.media_mime ?? undefined,
   });
 
   // O adapter devolve o id da linha em `messages` quando enviou.

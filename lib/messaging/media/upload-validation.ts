@@ -14,7 +14,12 @@ export type MessageKind = "image" | "video" | "audio" | "document";
  * `docs/doctrine/restricao-de-canal.md` proíbe.
  */
 export function isMediaPathOwnedBy(path: string, orgId: string, conversationId: string): boolean {
-  return path.startsWith(`${orgId}/${conversationId}/`);
+  if (path.startsWith(`${orgId}/${conversationId}/`)) return true;
+  // Asset de CAMPANHA (A1/Fase 2): o media do passo é um asset da ORGANIZAÇÃO
+  // (reusado por todos os destinatários), não de uma conversa. O prefixo
+  // `{org}/campaigns/...` garante que é da MESMA org — o gate continua barrando
+  // o path de outra conta.
+  return path.startsWith(`${orgId}/campaigns/`);
 }
 
 const DOCUMENT_MIMES = new Set([

@@ -24,6 +24,16 @@ interface Conexao {
   display_name: string | null;
   phone_number: string | null;
   status: string | null;
+  daily_message_limit: number | null;
+}
+
+interface Passo {
+  body: string;
+  media_storage_path?: string;
+  media_mime?: string;
+  media_kind?: "image" | "document" | "voice";
+  media_name?: string;
+  delay_after_seconds: string;
 }
 
 const ROTULO_STATUS: Record<string, string> = {
@@ -35,15 +45,21 @@ const ROTULO_STATUS: Record<string, string> = {
   cancelada: "Cancelada",
 };
 
+const DIAS_DA_SEMANA: { valor: number; rotulo: string }[] = [
+  { valor: 1, rotulo: "Seg" },
+  { valor: 2, rotulo: "Ter" },
+  { valor: 3, rotulo: "Qua" },
+  { valor: 4, rotulo: "Qui" },
+  { valor: 5, rotulo: "Sex" },
+  { valor: 6, rotulo: "Sáb" },
+  { valor: 0, rotulo: "Dom" },
+];
+
 /**
- * A tela de campanhas (A1, Fase 1 — o mínimo que já dispara).
- *
- * ── O PASSO DE REVISÃO É OBRIGATÓRIO ────────────────────────────────────────
- *
- * A mesa de análise (a11y/ux, 🔴): "a tela não tem passo de revisão/confirmação
- * — `agora` dispara no mesmo gesto de salvar". Disparo em massa é irreversível;
- * aqui o botão "Criar e disparar" só ativa depois de mostrar um resumo (nome,
- * conexões, público, mensagem) para confirmação explícita.
+ * A tela de campanhas (A1). Fase 1: mínimo que dispara (nome, conexões, público,
+ * 1 passo, agora) com o PASSO DE REVISÃO. Fase 2 amplia: multi-passo com mídia
+ * (upload via rota), agendamento simples, janela/dias, e o aviso do teto
+ * COMPARTILHADO com o número do teto de cada conexão.
  */
 export function Campanhas() {
   const t = useT();
@@ -54,10 +70,15 @@ export function Campanhas() {
   const [nome, setNome] = useState("");
   const [sessoes, setSessoes] = useState<string[]>([]);
   const [tags, setTags] = useState("");
-  const [mensagem, setMensagem] = useState("");
+  const [passos, setPassos] = useState<Passo[]>([{ body: "", delay_after_seconds: "" }]);
   const [tetoDiario, setTetoDiario] = useState("");
+  const [horaInicio, setHoraInicio] = useState("8");
+  const [horaFim, setHoraFim] = useState("20");
+  const [dias, setDias] = useState<number[]>([1, 2, 3, 4, 5]);
+  const [agendadoPara, setAgendadoPara] = useState("");
   const [enviando, setEnviando] = useState(false);
   const [revisando, setRevisando] = useState(false);
+  const [subindo, setSubindo] = useState<number | null>(null);
 
   const carregar = useCallback(async () => {
     try {
@@ -91,26 +112,89 @@ export function Campanhas() {
     [tags],
   );
 
+  const temCorpoOuMidia = (p: Passo) => p.body.trim().length > 0 || Boolean(p.media_storage_path);
   const podeRevisar =
     nome.trim().length > 0 &&
     sessoes.length > 0 &&
-    mensagem.trim().length > 0;
+    passos.some(temCorpoOuMidia) &&
+    passos.every(temCorpoOuMidia);
+
+  async function subirArquivo(index: number, arquivo: File) {
+    setSubindo(index);
+    try {
+      const form = new FormData();
+      form.append("file", arquivo);
+      const res = await fetch("/api/v1/campaigns/media", { method: "POST", body: form });
+      const json = await res.json().catch(() => null);
+      if (!res.ok) {
+        toast.error(json?.error?.message ? t(json.error.message) : t("Não consegui subir o arquivo."));
+        return;
+      }
+      setPassos((atual) => {
+        const novo = atual.map((p, i) => (i === index ? { ...p, ...json.data } : p));
+        return novo;
+      });
+    } finally {
+      setSubindo(null);
+    }
+  }
+
+  function atualizarPasso(index: number, campo: Partial<Passo>) {
+    setPassos((atual) => atual.map((p, i) => (i === index ? { ...p, ...campo } : p)));
+  }
+
+  function adicionarPasso() {
+    setPassos((atual) => [...atual, { body: "", delay_after_seconds: "" }]);
+  }
+
+  function removerPasso(index: number) {
+    setPassos((atual) => atual.filter((_, i) => i !== index));
+  }
+
+  function alternarSessao(id: string) {
+    setSessoes((atual) => (atual.includes(id) ? atual.filter((v) => v !== id) : [...atual, id]));
+  }
+
+  function alternarDia(valor: number) {
+    setDias((atual) => (atual.includes(valor) ? atual.filter((d) => d !== valor) : [...atual, valor]));
+  }
+
+  const limiteEfetivoPorConexao = useMemo(() => {
+    const teto = tetoDiario ? Number(tetoDiario) : null;
+    return conexoes
+      .filter((c) => sessoes.includes(c.id))
+      .map((c) => ({ rotulo: c.display_name ?? c.phone_number ?? c.id.slice(0, 8), teto: c.daily_message_limit ?? null }))
+      .filter((c) => c.teto !== null);
+  }, [conexoes, sessoes, tetoDiario]);
 
   async function criarEDisparar() {
     if (!podeRevisar) return;
     setEnviando(true);
     try {
+      const steps = passos.map((p) => ({
+        body: p.body.trim() || null,
+        media_storage_path: p.media_storage_path ?? null,
+        media_kind: p.media_kind ?? null,
+        media_mime: p.media_mime ?? null,
+        delay_after_seconds: Number(p.delay_after_seconds || 0),
+      }));
+      const corpo = {
+        name: nome.trim(),
+        channel_session_ids: sessoes,
+        audience: tagsArray.length ? { tags: tagsArray } : {},
+        steps,
+        daily_limit: tetoDiario ? Number(tetoDiario) : null,
+        new_lead_strategy: "rotacionar",
+        window_start_hour: Number(horaInicio),
+        window_end_hour: Number(horaFim),
+        allowed_weekdays: dias,
+        ...(agendadoPara ? { schedule_kind: "agendado", scheduled_at: new Date(agendadoPara).toISOString() } : {}),
+      };
+
       const criada = await fetch("/api/v1/campaigns", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          name: nome.trim(),
-          channel_session_ids: sessoes,
-          audience: tagsArray.length ? { tags: tagsArray } : {},
-          steps: [{ body: mensagem.trim() }],
-          daily_limit: tetoDiario ? Number(tetoDiario) : null,
-          new_lead_strategy: "rotacionar",
-        }),
+        body: JSON.stringify(corpo),
       });
       const criadaJson = await criada.json().catch(() => null);
       if (!criada.ok) {
@@ -130,23 +214,18 @@ export function Campanhas() {
         toast.error(ativadaJson?.error?.message ? t(ativadaJson.error.message) : t("Não consegui disparar a campanha."));
         return;
       }
-      toast.success(t("Campanha disparada."));
+      toast.success(agendadoPara ? t("Campanha agendada.") : t("Campanha disparada."));
       setNome("");
       setSessoes([]);
       setTags("");
-      setMensagem("");
+      setPassos([{ body: "", delay_after_seconds: "" }]);
       setTetoDiario("");
+      setAgendadoPara("");
       setRevisando(false);
       await carregar();
     } finally {
       setEnviando(false);
     }
-  }
-
-  function alternarSessao(id: string) {
-    setSessoes((atual) =>
-      atual.includes(id) ? atual.filter((v) => v !== id) : [...atual, id],
-    );
   }
 
   const resumoPessoa = useMemo(() => {
@@ -155,15 +234,24 @@ export function Campanhas() {
       nome: nome.trim(),
       conexoes: sessoes.length,
       publico: tagsArray.length ? tagsArray.join(", ") : t("Toda a base (sem filtro)"),
-      mensagem: mensagem.trim(),
+      passos: passos.map((p, i) => ({
+        indice: i + 1,
+        rotulo: p.media_kind
+          ? p.media_kind === "voice"
+            ? t("Nota de voz")
+            : p.media_kind === "image"
+              ? t("Imagem")
+              : t("Documento")
+          : p.body.trim(),
+      })),
+      agendado: agendadoPara ? new Date(agendadoPara).toLocaleString() : t("Agora"),
     };
-  }, [podeRevisar, nome, sessoes, tagsArray, mensagem, t]);
+  }, [podeRevisar, nome, sessoes, tagsArray, passos, agendadoPara, t]);
 
   return (
     <div className="space-y-6" data-testid="campanhas">
       <h1 className="text-xl font-semibold">{t("Campanhas")}</h1>
 
-      {/* ── LISTA (acompanhamento) ── */}
       <Card className="p-4">
         <h2 className="mb-2 text-sm font-medium">{t("Suas campanhas")}</h2>
         {carregando ? (
@@ -188,19 +276,12 @@ export function Campanhas() {
         )}
       </Card>
 
-      {/* ── FORMULÁRIO (criação) ── */}
       <Card className="p-4" data-testid="formulario-campanha">
         <h2 className="mb-3 text-sm font-medium">{t("Nova campanha")}</h2>
         <div className="space-y-4">
           <div>
             <Label htmlFor="nome">{t("Nome da campanha")}</Label>
-            <Input
-              id="nome"
-              value={nome}
-              onChange={(e) => setNome(e.target.value)}
-              placeholder={t("Ex.: Black Friday")}
-              data-testid="campo-nome"
-            />
+            <Input id="nome" value={nome} onChange={(e) => setNome(e.target.value)} placeholder={t("Ex.: Black Friday")} data-testid="campo-nome" />
           </div>
 
           <div>
@@ -211,17 +292,11 @@ export function Campanhas() {
               <div className="mt-1 space-y-1">
                 {conexoes.map((con) => (
                   <label key={con.id} className="flex items-center gap-2 text-sm">
-                    <input
-                      type="checkbox"
-                      checked={sessoes.includes(con.id)}
-                      onChange={() => alternarSessao(con.id)}
-                      data-testid={`conexao-${con.id}`}
-                    />
-                    <span>
-                      {con.display_name ?? con.phone_number ?? con.id.slice(0, 8)}
-                    </span>
-                    {con.phone_number && (
-                      <span className="text-xs text-muted-foreground">{con.phone_number}</span>
+                    <input type="checkbox" checked={sessoes.includes(con.id)} onChange={() => alternarSessao(con.id)} data-testid={`conexao-${con.id}`} />
+                    <span>{con.display_name ?? con.phone_number ?? con.id.slice(0, 8)}</span>
+                    {con.phone_number && <span className="text-xs text-muted-foreground">{con.phone_number}</span>}
+                    {con.daily_message_limit !== null && (
+                      <span className="text-xs text-muted-foreground">· {t("teto")} {con.daily_message_limit}</span>
                     )}
                   </label>
                 ))}
@@ -231,50 +306,118 @@ export function Campanhas() {
 
           <div>
             <Label htmlFor="tags">{t("Público (etiquetas)")}</Label>
-            <Input
-              id="tags"
-              value={tags}
-              onChange={(e) => setTags(e.target.value)}
-              placeholder={t("Ex.: interessado, black-friday")}
-              data-testid="campo-tags"
-            />
-            <p className="mt-1 text-xs text-muted-foreground">
-              {t("Vazio = toda a base (sem filtro). Separadas por vírgula.")}
-            </p>
+            <Input id="tags" value={tags} onChange={(e) => setTags(e.target.value)} placeholder={t("Ex.: interessado, black-friday")} data-testid="campo-tags" />
+            <p className="mt-1 text-xs text-muted-foreground">{t("Vazio = toda a base (sem filtro). Separadas por vírgula.")}</p>
           </div>
 
           <div>
-            <Label htmlFor="mensagem">{t("Mensagem")}</Label>
-            <Textarea
-              id="mensagem"
-              value={mensagem}
-              rows={3}
-              onChange={(e) => setMensagem(e.target.value)}
-              data-testid="campo-mensagem"
-            />
+            <Label>{t("Mensagens (passos)")}</Label>
+            <div className="space-y-3">
+              {passos.map((passo, i) => (
+                <div key={i} className="rounded-md border p-3" data-testid={`passo-${i}`}>
+                  <div className="mb-2 flex items-center justify-between">
+                    <span className="text-xs font-medium">
+                      {t("Passo")} {i + 1}
+                    </span>
+                    {passos.length > 1 && (
+                      <button type="button" className="text-xs text-destructive" onClick={() => removerPasso(i)}>
+                        {t("Remover")}
+                      </button>
+                    )}
+                  </div>
+                  <Textarea
+                    rows={2}
+                    value={passo.body}
+                    onChange={(e) => atualizarPasso(i, { body: e.target.value })}
+                    placeholder={t("Texto da mensagem")}
+                    data-testid={`campo-passo-${i}`}
+                  />
+                  <div className="mt-2 flex items-center gap-2">
+                    {passo.media_storage_path ? (
+                      <span className="text-xs text-muted-foreground">
+                        {passo.media_kind === "voice" ? t("Nota de voz") : passo.media_kind === "image" ? t("Imagem") : t("Documento")}
+                        {passo.media_name ? ` — ${passo.media_name}` : ""}
+                      </span>
+                    ) : (
+                      <input
+                        type="file"
+                        disabled={subindo === i}
+                        aria-label={t("Anexar arquivo")}
+                        data-testid={`arquivo-${i}`}
+                        className="text-xs"
+                        onChange={(e) => {
+                          const f = e.target.files?.[0];
+                          if (f) void subirArquivo(i, f);
+                          e.target.value = "";
+                        }}
+                      />
+                    )}
+                    <Label className="text-xs">{t("Espera (s)")}</Label>
+                    <Input
+                      className="w-24"
+                      type="number"
+                      min={0}
+                      value={passo.delay_after_seconds}
+                      onChange={(e) => atualizarPasso(i, { delay_after_seconds: e.target.value })}
+                      data-testid={`espera-${i}`}
+                    />
+                  </div>
+                </div>
+              ))}
+              <Button type="button" variant="outline" size="sm" onClick={adicionarPasso} data-testid="adicionar-passo">
+                {t("Adicionar passo")}
+              </Button>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label htmlFor="teto">{t("Teto por dia (opcional)")}</Label>
+              <Input id="teto" type="number" min={1} value={tetoDiario} onChange={(e) => setTetoDiario(e.target.value)} data-testid="campo-teto" />
+              {limiteEfetivoPorConexao.length > 0 && (
+                <p className="mt-1 text-xs text-amber-600" role="alert">
+                  {t("Este teto é COMPARTILHADO com o atendimento dos números selecionados.")}{" "}
+                  {limiteEfetivoPorConexao.map((c) => `${c.rotulo}: ${c.teto}`).join(" · ")}
+                </p>
+              )}
+            </div>
+            <div>
+              <Label htmlFor="agendado">{t("Agendar para (opcional)")}</Label>
+              <Input
+                id="agendado"
+                type="datetime-local"
+                value={agendadoPara}
+                onChange={(e) => setAgendadoPara(e.target.value)}
+                data-testid="campo-agendado"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label htmlFor="hora-inicio">{t("Horário início")}</Label>
+              <Input id="hora-inicio" type="number" min={0} max={23} value={horaInicio} onChange={(e) => setHoraInicio(e.target.value)} data-testid="hora-inicio" />
+            </div>
+            <div>
+              <Label htmlFor="hora-fim">{t("Horário fim")}</Label>
+              <Input id="hora-fim" type="number" min={0} max={23} value={horaFim} onChange={(e) => setHoraFim(e.target.value)} data-testid="hora-fim" />
+            </div>
           </div>
 
           <div>
-            <Label htmlFor="teto">{t("Teto por dia (opcional)")}</Label>
-            <Input
-              id="teto"
-              type="number"
-              min={1}
-              value={tetoDiario}
-              onChange={(e) => setTetoDiario(e.target.value)}
-              data-testid="campo-teto"
-            />
-            <p className="mt-1 text-xs text-muted-foreground">
-              {t("Este teto é COMPARTILHADO com o atendimento do número.")}
-            </p>
+            <Label>{t("Dias da semana")}</Label>
+            <div className="mt-1 flex flex-wrap gap-2">
+              {DIAS_DA_SEMANA.map((d) => (
+                <label key={d.valor} className="flex items-center gap-1 text-sm">
+                  <input type="checkbox" checked={dias.includes(d.valor)} onChange={() => alternarDia(d.valor)} data-testid={`dia-${d.valor}`} />
+                  <span>{d.rotulo}</span>
+                </label>
+              ))}
+            </div>
           </div>
 
           {!revisando ? (
-            <Button
-              disabled={!podeRevisar || enviando}
-              onClick={() => setRevisando(true)}
-              data-testid="ir-para-revisao"
-            >
+            <Button disabled={!podeRevisar || enviando} onClick={() => setRevisando(true)} data-testid="ir-para-revisao">
               {t("Revisar")}
             </Button>
           ) : (
@@ -295,18 +438,22 @@ export function Campanhas() {
                     <dd className="text-right">{resumoPessoa.publico}</dd>
                   </div>
                   <div className="flex justify-between gap-4">
-                    <dt className="text-muted-foreground">{t("Mensagem")}</dt>
-                    <dd className="max-w-[60%] text-right">{resumoPessoa.mensagem}</dd>
+                    <dt className="text-muted-foreground">{t("Quando")}</dt>
+                    <dd className="text-right">{resumoPessoa.agendado}</dd>
                   </div>
+                  {resumoPessoa.passos.map((p) => (
+                    <div key={p.indice} className="flex justify-between gap-4">
+                      <dt className="text-muted-foreground">
+                        {t("Passo")} {p.indice}
+                      </dt>
+                      <dd className="max-w-[60%] text-right">{p.rotulo}</dd>
+                    </div>
+                  ))}
                 </dl>
               )}
               <div className="mt-3 flex gap-2">
-                <Button
-                  disabled={enviando}
-                  onClick={() => void criarEDisparar()}
-                  data-testid="confirmar-disparo"
-                >
-                  {enviando ? t("Disparando…") : t("Criar e disparar")}
+                <Button disabled={enviando} onClick={() => void criarEDisparar()} data-testid="confirmar-disparo">
+                  {enviando ? t("Disparando…") : agendadoPara ? t("Criar e agendar") : t("Criar e disparar")}
                 </Button>
                 <Button variant="outline" disabled={enviando} onClick={() => setRevisando(false)}>
                   {t("Voltar")}

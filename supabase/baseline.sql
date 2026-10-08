@@ -27280,6 +27280,31 @@ create index if not exists idx_messages_sem_ack
 create index if not exists idx_contacts_custom_fields_gin
   on public.contacts using gin (custom_fields jsonb_path_ops);
 
+
+-- ---- campaign_steps.media_mime (migration 0274) ----
+alter table public.campaign_steps
+  add column if not exists media_mime text;
+
+comment on column public.campaign_steps.media_mime is
+  'O mime do arquivo do passo (ex.: image/png, application/pdf). O worker o repassa ao caminho de envio para gravar na linha de messages.';
+
+
+-- ---- bucket da midia de campanha (migration 0275) ----
+insert into storage.buckets (id, name, public, file_size_limit)
+values ('campaign-media', 'campaign-media', false, 52428800)
+on conflict (id) do nothing;
+
+drop policy if exists "campaign_media_read" on storage.objects;
+create policy "campaign_media_read" on storage.objects for select to authenticated
+  using (
+    bucket_id = 'campaign-media'
+    and exists (
+      select 1 from public.user_organizations uo
+      where uo.user_id = auth.uid() and uo.revoked_at is null
+        and uo.organization_id = (split_part(name, '/', 1))::uuid
+    )
+  );
+
 -- ---- VARREDURA anon: função nova nasce exposta em quem ATUALIZA (migration 0116) ----
 --
 -- ⚠️ ESTE BLOCO É, DE PROPÓSITO, O ÚLTIMO DO ARQUIVO. Apêndice novo entra ANTES

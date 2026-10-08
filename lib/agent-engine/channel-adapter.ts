@@ -27,6 +27,15 @@ export interface ChannelSendInput {
   conversationId: string;
   body: string;
   /**
+   * Mídia da mensagem (campanha/asset da organização). Os três campos juntos —
+   * o path no bucket, o mime e (quando a URL assinada já existe) a URL. O
+   * `sendMessageHandler` os grava na linha de `messages` e o adapter busca o
+   * arquivo pelo path/url. São OPCIONAIS de propósito: texto segue sem eles.
+   */
+  media_storage_path?: string;
+  media_mime?: string;
+  media_url?: string;
+  /**
    * Presente = este envio é um TEMPLATE aprovado, não texto livre.
    *
    * Opcional de propósito: o contrato continua válido para todo canal que só sabe

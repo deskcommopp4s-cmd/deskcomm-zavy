@@ -93,6 +93,7 @@ export async function POST(req: NextRequest): Promise<Response> {
     body: passo.body ?? null,
     media_kind: passo.media_kind ?? null,
     media_storage_path: passo.media_storage_path ?? null,
+    media_mime: passo.media_mime ?? null,
     delay_after_seconds: passo.delay_after_seconds ?? 0,
   }));
   const { error: erroPassos } = await supabase.from("campaign_steps").insert(passos);

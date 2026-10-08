@@ -56,6 +56,9 @@ export interface SendMessageInput {
   seq: number;
   conversationId: string;
   body: string;
+  media_storage_path?: string;
+  media_mime?: string;
+  media_url?: string;
   /**
    * Presente = envio de TEMPLATE. O `body` continua sendo o texto RENDERIZADO — é
    * ele que entra no hash de idempotência e é ele que os gates de conteúdo avaliaram.
@@ -145,6 +148,10 @@ export async function sendTurnMessage(
         },
         {
           conversation_id: input.conversationId,
+          // Mídia da campanha/asset — opcional; o handler já grava estes campos.
+          media_storage_path: input.media_storage_path,
+          media_mime: input.media_mime,
+          media_url: input.media_url,
           ...(input.template
             ? {
                 type: 'template' as const,

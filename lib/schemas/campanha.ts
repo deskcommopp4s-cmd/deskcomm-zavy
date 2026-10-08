@@ -19,6 +19,7 @@ export const passoDaCampanhaSchema = z.object({
   body: z.string().min(1).max(4000).optional(),
   media_kind: z.enum(["image", "document", "voice"]).optional(),
   media_storage_path: z.string().optional(),
+  media_mime: z.string().optional(),
   delay_after_seconds: z.number().int().min(0).max(86_400).optional(),
 });
 
