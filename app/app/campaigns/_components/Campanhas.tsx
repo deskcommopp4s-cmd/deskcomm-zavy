@@ -99,9 +99,20 @@ export function Campanhas() {
       ]);
       const camp = await rCamp.json().catch(() => null);
       const conex = await rConex.json().catch(() => null);
-      if (rCamp.ok) setCampanhas(Array.isArray(camp) ? camp : []);
+      // ⚠️ O `ok()` do repo ENVELOPA: `{ data: [...] }`. Ler o corpo cru com
+      // `Array.isArray` devolvia sempre [] — a tela mostrava "Nenhuma conexão
+      // ativa" COM conexão no ar, e o "Escolha a conexão" não abria nada.
+      // MEDIDO na tela renderizada (Playwright contra produção).
+      const lerLista = (j: unknown): unknown[] => {
+        if (Array.isArray(j)) return j;
+        if (j && typeof j === "object" && Array.isArray((j as { data?: unknown }).data)) {
+          return (j as { data: unknown[] }).data;
+        }
+        return [];
+      };
+      if (rCamp.ok) setCampanhas(lerLista(camp) as Campanha[]);
       if (rConex.ok) {
-        const lista = Array.isArray(conex) ? conex : [];
+        const lista = lerLista(conex) as Conexao[];
         setConexoes(lista.filter((c) => c.status !== "disconnected"));
       }
     } finally {
