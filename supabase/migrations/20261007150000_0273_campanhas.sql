@@ -126,7 +126,7 @@ create table if not exists public.campaign_recipients (
   channel_session_id uuid not null,
   conversation_id uuid,
 
-  current_step smallint not null default 0,
+  current_step smallint not null default 1,  -- 1 = o primeiro passo (os steps sao 1-based)
   status text not null default 'pendente',
   next_send_at timestamptz,
 
@@ -163,6 +163,9 @@ comment on column public.campaign_recipients.outbound_message_id is
   'A linha de messages deste envio. É o que liga o destinatário ao ack do webhook.';
 comment on column public.campaign_recipients.inhibited_reason is
   'Por que este destinatário parou. NUNCA gravar is_blocked do contato aqui. Quando o lead responde, a campanha PAUSA para aquele CONTATO.';
+
+-- Quem aplicou a 0273 com default 0 (antes da correção) recebe o novo default.
+alter table public.campaign_recipients alter column current_step set default 1;
 
 create index if not exists idx_campaign_recipients_due
   on public.campaign_recipients (campaign_id, status, next_send_at)
@@ -323,7 +326,7 @@ comment on function public.fn_claim_due_campaign_recipients(int, int) is
 -- 8. REAPER — sem ele, o estado "enviando" vira terminal
 -- ============================================================================
 create or replace function public.fn_reaper_campaign_recipients(
-  p_max_attempts smallint default 5
+  p_max_attempts int default 5
 )
 returns integer
 language sql

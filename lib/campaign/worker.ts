@@ -134,7 +134,7 @@ async function processarUmDestinatario(
   if (!step) {
     // Sem passo para o contador: o destinatário não tem mais o que receber → parado.
     await pool.query(
-      "update public.campaign_recipients set status = 'parado' where id = $1",
+      "update public.campaign_recipients set status = 'parado', claimed_until = null, claimed_by = null where id = $1",
       [r.id],
     );
     return "reagendado";
