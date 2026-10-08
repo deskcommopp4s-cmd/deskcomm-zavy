@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -32,6 +33,17 @@ interface Conexao {
   phone_number: string | null;
   status: string | null;
   daily_message_limit: number | null;
+}
+
+interface DetalheDaCampanha {
+  campanha: {
+    id: string; name: string; status: string; auto_paused: boolean;
+    paused_reason: string | null; breaker_layer: number | null;
+    total_recipients: number; sent_count: number; failed_count: number;
+  };
+  passos: { step_order: number; body: string | null; media_kind: string | null; delay_after_seconds: number }[];
+  destinatarios: { id: string; status: string; nome: string; current_step: number; attempts: number; last_error: string | null }[];
+  contadores: { entregues: number; lidas: number; respondidos: number };
 }
 
 interface Etiqueta {
@@ -116,6 +128,8 @@ export function Campanhas() {
   const [enviando, setEnviando] = useState(false);
   const [revisando, setRevisando] = useState(false);
   const [subindo, setSubindo] = useState<number | null>(null);
+  const [detalhe, setDetalhe] = useState<DetalheDaCampanha | null>(null);
+  const [abrindoDetalhe, setAbrindoDetalhe] = useState(false);
 
   const carregar = useCallback(async () => {
     try {
@@ -341,6 +355,21 @@ export function Campanhas() {
       await carregar();
     } finally {
       setEnviando(false);
+    }
+  }
+
+  async function abrirDetalhe(campanha: Campanha) {
+    setAbrindoDetalhe(true);
+    try {
+      const res = await fetch(`/api/v1/campaigns/${campanha.id}`);
+      const json = await res.json().catch(() => null);
+      if (!res.ok) {
+        toast.error(json?.error?.message ? t(json.error.message) : t("Não consegui abrir a campanha."));
+        return;
+      }
+      setDetalhe((json?.data ?? null) as DetalheDaCampanha | null);
+    } finally {
+      setAbrindoDetalhe(false);
     }
   }
 
@@ -701,7 +730,14 @@ export function Campanhas() {
           <ul className="divide-y">
             {campanhas.map((c) => (
               <li key={c.id} className="flex flex-wrap items-center justify-between gap-2 py-2 text-sm">
-                <span className="font-medium">{c.name}</span>
+                <button
+                  type="button"
+                  className="font-medium text-left hover:underline"
+                  onClick={() => void abrirDetalhe(c)}
+                  data-testid={`abrir-campanha-${c.id}`}
+                >
+                  {c.name}
+                </button>
                 <span className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
                   <Badge variant="secondary">{t(ROTULO_STATUS[c.status] ?? c.status)}</Badge>
                   <span>{c.sent_count}/{c.total_recipients} {t("enviadas")}</span>
@@ -720,6 +756,76 @@ export function Campanhas() {
           </ul>
         )}
       </Card>
+
+      {/* O DETALHE — abre no clique do Acompanhamento. Havia contadores e o botão
+          PAUSAR, mas clicar na campanha não fazia NADA. */}
+      <Dialog open={detalhe !== null} onOpenChange={(aberto) => { if (!aberto) setDetalhe(null); }}>
+        <DialogContent className="max-h-[80vh] max-w-2xl overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>{detalhe?.campanha.name ?? t("Campanha")}</DialogTitle>
+          </DialogHeader>
+          {detalhe && (
+            <div className="space-y-4 text-sm">
+              <div className="flex flex-wrap items-center gap-3">
+                <Badge variant="secondary">{t(ROTULO_STATUS[detalhe.campanha.status] ?? detalhe.campanha.status)}</Badge>
+                {detalhe.campanha.auto_paused && detalhe.campanha.paused_reason && (
+                  <span className="flex items-center gap-2 rounded-md border border-amber-500 p-2 text-amber-600" role="alert">
+                    ⚠ {t("Pausada automaticamente")}: {detalhe.campanha.paused_reason}
+                    {detalhe.campanha.breaker_layer ? ` (${t("camada")} ${detalhe.campanha.breaker_layer})` : ""}
+                  </span>
+                )}
+              </div>
+
+              <dl className="grid grid-cols-3 gap-2">
+                <div><dt className="text-xs text-muted-foreground">{t("Enviadas")}</dt><dd className="text-lg">{detalhe.campanha.sent_count}</dd></div>
+                <div><dt className="text-xs text-muted-foreground">{t("Entregues")}</dt><dd className="text-lg">{detalhe.contadores.entregues}</dd></div>
+                <div><dt className="text-xs text-muted-foreground">{t("Lidas")}</dt><dd className="text-lg">{detalhe.contadores.lidas}</dd></div>
+                <div><dt className="text-xs text-muted-foreground">{t("Respostas")}</dt><dd className="text-lg">{detalhe.contadores.respondidos}</dd></div>
+                <div><dt className="text-xs text-muted-foreground">{t("Falhas")}</dt><dd className="text-lg">{detalhe.campanha.failed_count}</dd></div>
+                <div><dt className="text-xs text-muted-foreground">{t("Total")}</dt><dd className="text-lg">{detalhe.campanha.total_recipients}</dd></div>
+              </dl>
+
+              <div>
+                <h4 className="mb-1 font-medium">{t("Passos")}</h4>
+                {detalhe.passos.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">{t("Sem passos.")}</p>
+                ) : (
+                  <ul className="space-y-1">
+                    {detalhe.passos.map((p) => (
+                      <li key={p.step_order} className="rounded-md border p-2 text-xs">
+                        <strong>{t("Passo")} {p.step_order}</strong>
+                        {p.media_kind ? ` · ${p.media_kind}` : ""}
+                        {p.delay_after_seconds ? ` · ${t("espera")} ${p.delay_after_seconds}s` : ""}
+                        {p.body ? <div className="text-muted-foreground">{p.body}</div> : null}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+
+              <div>
+                <h4 className="mb-1 font-medium">{t("Destinatários")} ({detalhe.destinatarios.length})</h4>
+                {detalhe.destinatarios.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">{t("Nenhum destinatário ainda.")}</p>
+                ) : (
+                  <ul className="max-h-64 space-y-1 overflow-y-auto">
+                    {detalhe.destinatarios.map((d) => (
+                      <li key={d.id} className="flex items-center justify-between gap-2 rounded-md border px-2 py-1 text-xs">
+                        <span>{d.nome}</span>
+                        <span className="flex items-center gap-2 text-muted-foreground">
+                          <Badge variant="outline">{d.status}</Badge>
+                          {d.attempts > 0 && <span>{t("tentativas")} {d.attempts}</span>}
+                          {d.last_error && <span className="text-destructive">{d.last_error.slice(0, 40)}</span>}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
