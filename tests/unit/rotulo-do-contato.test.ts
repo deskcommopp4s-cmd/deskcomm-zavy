@@ -176,6 +176,12 @@ describe("a sétima cópia não nasce", () => {
         "O mesmo rótulo de CONEXÃO do resumo do teto na tela de campanha — display_name do número; não é o nome de um contato",
     },
     {
+      arquivo: "lib/campaign/worker.ts",
+      trecho: "nome: c?.display_name ?? null",
+      motivo:
+        "Lê o display_name do CONTATO só como contexto para a variação por IA da campanha — não decide o nome exibido em lugar nenhum",
+    },
+    {
       arquivo: "app/api/v1/channels/official/route.ts",
       trecho: "displayName: data?.display_name ?? null,",
       motivo: "nome do NÚMERO no canal oficial da Meta, não de contato",

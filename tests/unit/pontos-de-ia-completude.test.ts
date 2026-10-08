@@ -101,6 +101,12 @@ const FORA_DO_SEAM: Record<string, { arquivo: string; marcador: string }> = {
     arquivo: "workers/ai-support-worker.ts",
     marcador: "resolverModeloDoPonto",
   },
+  // A variação da campanha usa `generateObject` direto (como o suporte), não o
+  // seam do agent-engine — o texto-base entra como prompt, não como turno.
+  campanha_variacao: {
+    arquivo: "lib/campaign/variacao.ts",
+    marcador: "resolverModeloDoPonto",
+  },
   embedding_indexar: { arquivo: "lib/ai/embed.ts", marcador: "embed(" },
   embedding_consultar: {
     arquivo: "lib/agent-engine/edge/llm/embed.ts",

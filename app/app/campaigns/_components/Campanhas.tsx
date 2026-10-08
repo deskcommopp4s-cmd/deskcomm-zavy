@@ -79,6 +79,14 @@ export function Campanhas() {
   const [horaFim, setHoraFim] = useState("20");
   const [dias, setDias] = useState<number[]>([1, 2, 3, 4, 5]);
   const [agendadoPara, setAgendadoPara] = useState("");
+  const [novaEstrategia, setNovaEstrategia] = useState<"rotacionar" | "fixa">("rotacionar");
+  const [sessaoFixa, setSessaoFixa] = useState("");
+  const [variacaoIa, setVariacaoIa] = useState(false);
+  const [recorrente, setRecorrente] = useState(false);
+  const [recorrenciaTipo, setRecorrenciaTipo] = useState<"semanal" | "intervalo">("semanal");
+  const [recorrenciaDias, setRecorrenciaDias] = useState<number[]>([1]);
+  const [recorrenciaHora, setRecorrenciaHora] = useState("9");
+  const [recorrenciaIntervalo, setRecorrenciaIntervalo] = useState("7");
   const [enviando, setEnviando] = useState(false);
   const [revisando, setRevisando] = useState(false);
   const [subindo, setSubindo] = useState<number | null>(null);
@@ -162,6 +170,10 @@ export function Campanhas() {
     setDias((atual) => (atual.includes(valor) ? atual.filter((d) => d !== valor) : [...atual, valor]));
   }
 
+  function alternarDiaRecorrencia(valor: number) {
+    setRecorrenciaDias((atual) => (atual.includes(valor) ? atual.filter((d) => d !== valor) : [...atual, valor]));
+  }
+
   const limiteEfetivoPorConexao = useMemo(() => {
     const teto = tetoDiario ? Number(tetoDiario) : null;
     return conexoes
@@ -202,17 +214,29 @@ export function Campanhas() {
         media_mime: p.media_mime ?? null,
         delay_after_seconds: Number(p.delay_after_seconds || 0),
       }));
+      const recurrence =
+        recorrente && recorrenciaTipo === "semanal"
+          ? { kind: "semanal", weekdays: recorrenciaDias, hour: Number(recorrenciaHora), minute: 0 }
+          : recorrente && recorrenciaTipo === "intervalo"
+            ? { kind: "intervalo", interval_n: Number(recorrenciaIntervalo) || 1, interval_unit: "dia", hour: Number(recorrenciaHora), minute: 0 }
+            : null;
       const corpo = {
         name: nome.trim(),
         channel_session_ids: sessoes,
         audience: tagsArray.length ? { tags: tagsArray } : {},
         steps,
         daily_limit: tetoDiario ? Number(tetoDiario) : null,
-        new_lead_strategy: "rotacionar",
+        new_lead_strategy: novaEstrategia,
+        new_lead_session_id: novaEstrategia === "fixa" ? sessaoFixa : null,
+        ai_variation: variacaoIa,
         window_start_hour: Number(horaInicio),
         window_end_hour: Number(horaFim),
         allowed_weekdays: dias,
-        ...(agendadoPara ? { schedule_kind: "agendado", scheduled_at: new Date(agendadoPara).toISOString() } : {}),
+        ...(recorrente
+          ? { schedule_kind: "recorrente", recurrence }
+          : agendadoPara
+            ? { schedule_kind: "agendado", scheduled_at: new Date(agendadoPara).toISOString() }
+            : {}),
       };
 
       const criada = await fetch("/api/v1/campaigns", {
@@ -245,6 +269,10 @@ export function Campanhas() {
       setPassos([{ body: "", delay_after_seconds: "" }]);
       setTetoDiario("");
       setAgendadoPara("");
+      setNovaEstrategia("rotacionar");
+      setSessaoFixa("");
+      setVariacaoIa(false);
+      setRecorrente(false);
       setRevisando(false);
       await carregar();
     } finally {
@@ -439,6 +467,106 @@ export function Campanhas() {
               <Label htmlFor="hora-fim">{t("Horário fim")}</Label>
               <Input id="hora-fim" type="number" min={0} max={23} value={horaFim} onChange={(e) => setHoraFim(e.target.value)} data-testid="hora-fim" />
             </div>
+          </div>
+
+          <div>
+            <Label>{t("Leads sem conversa")}</Label>
+            <select
+              value={novaEstrategia}
+              onChange={(e) => setNovaEstrategia(e.target.value as "rotacionar" | "fixa")}
+              className="w-full rounded-md border px-2 py-1 text-sm"
+              data-testid="estrategia-novo"
+            >
+              <option value="rotacionar">{t("Rotacionar entre as conexões")}</option>
+              <option value="fixa">{t("Sempre por uma conexão fixa")}</option>
+            </select>
+            {novaEstrategia === "fixa" && (
+              <select
+                value={sessaoFixa}
+                onChange={(e) => setSessaoFixa(e.target.value)}
+                className="mt-1 w-full rounded-md border px-2 py-1 text-sm"
+                data-testid="sessao-fixa"
+              >
+                <option value="">{t("Escolha a conexão")}</option>
+                {conexoes.map((con) => (
+                  <option key={con.id} value={con.id}>
+                    {con.display_name ?? con.phone_number ?? con.id.slice(0, 8)}
+                  </option>
+                ))}
+              </select>
+            )}
+          </div>
+
+          <div>
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={variacaoIa}
+                onChange={(e) => setVariacaoIa(e.target.checked)}
+                data-testid="variacao-ia"
+              />
+              {t("Variação por IA (só no canal não oficial)")}
+            </label>
+          </div>
+
+          <div>
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={recorrente}
+                onChange={(e) => setRecorrente(e.target.checked)}
+                data-testid="recorrente"
+              />
+              {t("Campanha recorrente")}
+            </label>
+            {recorrente && (
+              <div className="mt-2 space-y-2">
+                <select
+                  value={recorrenciaTipo}
+                  onChange={(e) => setRecorrenciaTipo(e.target.value as "semanal" | "intervalo")}
+                  className="w-full rounded-md border px-2 py-1 text-sm"
+                  data-testid="recorrencia-tipo"
+                >
+                  <option value="semanal">{t("Toda semana, nos dias:")}</option>
+                  <option value="intervalo">{t("A cada N dias:")}</option>
+                </select>
+                {recorrenciaTipo === "semanal" ? (
+                  <div className="flex flex-wrap gap-2">
+                    {DIAS_DA_SEMANA.map((d) => (
+                      <label key={d.valor} className="flex items-center gap-1 text-sm">
+                        <input
+                          type="checkbox"
+                          checked={recorrenciaDias.includes(d.valor)}
+                          onChange={() => alternarDiaRecorrencia(d.valor)}
+                          data-testid={`recorrencia-dia-${d.valor}`}
+                        />
+                        <span>{d.rotulo}</span>
+                      </label>
+                    ))}
+                  </div>
+                ) : (
+                  <Input
+                    type="number"
+                    min={1}
+                    value={recorrenciaIntervalo}
+                    onChange={(e) => setRecorrenciaIntervalo(e.target.value)}
+                    data-testid="recorrencia-intervalo"
+                  />
+                )}
+                <div className="flex items-center gap-2">
+                  <Label className="text-xs">{t("Hora")}</Label>
+                  <Input
+                    className="w-24"
+                    type="number"
+                    min={0}
+                    max={23}
+                    value={recorrenciaHora}
+                    onChange={(e) => setRecorrenciaHora(e.target.value)}
+                    data-testid="recorrencia-hora"
+                  />
+                </div>
+              </div>
+            )}
           </div>
 
           <div>

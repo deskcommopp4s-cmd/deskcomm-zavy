@@ -300,6 +300,22 @@ export const PONTOS_DE_IA: readonly PontoDeIa[] = [
     registraEm: "llm_calls",
   },
   {
+    id: "campanha_variacao",
+    rotulo: "Variar o texto da campanha",
+    oQueFaz:
+      "Reescreve o texto do passo da campanha mantendo a estrutura — a mesma mensagem dita de outro jeito, para o lote não virar template idêntico em massa.",
+    papel: "atender",
+    // Sem tools: recebe o texto-base + o contexto do contato (nome, etiquetas)
+    // e devolve só o texto variado. O CUSTO é por mensagem e entra no
+    // orçamento DA ORGANIZAÇÃO (B3: a campanha consome os créditos de IA do
+    // cliente — ao contrário do suporte, onde a plataforma paga).
+    exige: {},
+    emissor: "lib/campaign/variacao.ts",
+    sintomaDeFalha:
+      "A campanha manda o mesmo texto para todo mundo e a mensagem tem cara de robô; a variação por IA não acontece (a tela ligou e nada mudou).",
+    registraEm: "llm_calls",
+  },
+  {
     id: "suporte_atendimento",
     rotulo: "Responder o chamado de suporte",
     oQueFaz:

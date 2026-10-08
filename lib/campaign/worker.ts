@@ -44,6 +44,8 @@ import { loadPacingState } from "@/lib/agent-engine/pacing/store";
 import { loadEnv } from "@/lib/agent-engine/env";
 import { PACING_DEFAULTS } from "@/lib/agent-engine/pacing/defaults";
 import { avaliarFreioDasCampanhasAtivas } from "@/lib/campaign/breaker";
+import { variarTextoDaCampanha } from "@/lib/campaign/variacao";
+import { proximoDisparo, type Recorrencia } from "@/lib/campaign/recorrencia";
 
 export const CAMPAIGN_TICK_LIMIT = 50;
 export const CAMPAIGN_LEASE_SECONDS = 120;
@@ -70,6 +72,12 @@ export async function tickCampanhas(pool: pg.Pool, now: Date = new Date()): Prom
   const knobs = PACING_DEFAULTS;
 
   const resultado: TickResult = { reclamados: 0, enviados: 0, reagendados: 0, erros: 0 };
+
+  // ── ACORDAR AS AGENDADAS (Fase 4, recorrência) ───────────────────────────
+  // Campanhas 'agendada' cujo scheduled_at chegou: RESET nos recipients (volta
+  // ao passo 1, pendente, next=now) + status='ativa'. A materialização já fez a
+  // base; aqui ela é rearmada para o próximo ciclo.
+  await despertarAgendadas(pool, now);
 
   // ── O FREIO (Fase 3): antes de tocar em QUALQUER destinatário ─────────────
   // Pausa as campanhas ativas sob um gatilho de ban (conexao caiu / falhas em
@@ -102,7 +110,7 @@ export async function tickCampanhas(pool: pg.Pool, now: Date = new Date()): Prom
   resultado.reclamados = reclamados.length;
   for (const r of reclamados) {
     try {
-      const resposta = await processarUmDestinatario(pool, channel, knobs, r, now);
+      const resposta = await processarUmDestinatario(pool, channel, knobs, r, now, log);
       if (resposta === "enviado") resultado.enviados += 1;
       else if (resposta === "reagendado") resultado.reagendados += 1;
     } catch (err) {
@@ -119,7 +127,84 @@ export async function tickCampanhas(pool: pg.Pool, now: Date = new Date()): Prom
   // ── 2. O REAPER: lease expirado volta para a fila (ou vira falhou) ──────
   await pool.query("select public.fn_reaper_campaign_recipients(5)");
 
+  // ── 3. CONCLUIDAS/REAGENDADAS (Fase 4) ────────────────────────────────────
+  await finalizarConcluidas(pool, now, log);
+
   return resultado;
+}
+
+/**
+ * Acorda as campanhas 'agendada' cujo `scheduled_at` chegou: reseta os
+ * recipients (passo 1, pendente, next agora) e marca 'ativa'.
+ */
+async function despertarAgendadas(pool: pg.Pool, now: Date): Promise<void> {
+  const { rows } = await pool.query<{ id: string }>(
+    `select id from public.campaigns
+      where status = 'agendada' and scheduled_at is not null and scheduled_at <= $1`,
+    [now.toISOString()],
+  );
+  for (const camp of rows) {
+    await pool.query(
+      `update public.campaign_recipients
+          set status = 'pendente', current_step = 1, claimed_until = null, claimed_by = null,
+              attempts = 0, last_error = null, next_send_at = $2
+        where campaign_id = $1`,
+      [camp.id, now.toISOString()],
+    );
+    await pool.query(
+      `update public.campaigns set status = 'ativa', scheduled_at = null, updated_at = now() where id = $1`,
+      [camp.id],
+    );
+  }
+}
+
+/**
+ * Finaliza as campanhas 'ativa' sem destinatários pendentes/enviando:
+ * - conclusão simples (não recorrente) → 'concluida';
+ * - recorrente → 'concluida' + reagenda ('agendada' com o próximo no fuso UTC —
+ *   o `campaigns.timezone` fica explícito para a Fase 4).
+ */
+async function finalizarConcluidas(pool: pg.Pool, now: Date, log: ReturnType<typeof createLogger>): Promise<void> {
+  const { rows } = await pool.query<{
+    id: string;
+    schedule_kind: string;
+    recurrence: unknown;
+  }>(
+    `select c.id, c.schedule_kind, c.recurrence::text as recurrence
+       from public.campaigns c
+      where c.status = 'ativa'
+        and not exists (
+          select 1 from public.campaign_recipients r
+           where r.campaign_id = c.id and r.status in ('pendente','enviando')
+        )`,
+  );
+  for (const camp of rows) {
+    if (camp.schedule_kind === "recorrente") {
+      const rec: Recorrencia | null =
+        typeof camp.recurrence === "string" && camp.recurrence
+          ? (JSON.parse(camp.recurrence) as Recorrencia)
+          : null;
+      const proximo = rec ? proximoDisparo(rec, now) : null;
+      if (proximo) {
+        await pool.query(
+          `update public.campaigns
+              set status = 'agendada', scheduled_at = $2, updated_at = now()
+            where id = $1`,
+          [camp.id, proximo.toISOString()],
+        );
+        log.info("[campaign.worker] campanha recorrente reagendada", {
+          campaign_id: camp.id,
+          proximo: proximo.toISOString(),
+        });
+        continue;
+      }
+      // sem régua de próximo: cai na conclusão simples
+    }
+    await pool.query(
+      `update public.campaigns set status = 'concluida', updated_at = now() where id = $1`,
+      [camp.id],
+    );
+  }
 }
 
 /**
@@ -131,6 +216,7 @@ async function processarUmDestinatario(
   knobs: typeof PACING_DEFAULTS,
   r: { id: string; organization_id: string; campaign_id: string; contact_id: string; channel_session_id: string; conversation_id: string | null; current_step: number },
   now: Date,
+  log: ReturnType<typeof createLogger>,
 ): Promise<"enviado" | "reagendado"> {
   // ── O passo atual ───────────────────────────────────────────────────────
   const passo = await pool.query<{
@@ -165,7 +251,9 @@ async function processarUmDestinatario(
     window_end_hour: number;
     allowed_weekdays: number[];
     timezone: string | null;
-  }>("select id, daily_limit, window_start_hour, window_end_hour, allowed_weekdays, timezone from public.campaigns where id = $1", [
+    ai_variation: boolean | null;
+    uses_official: boolean | null;
+  }>("select id, daily_limit, window_start_hour, window_end_hour, allowed_weekdays, timezone, ai_variation, uses_official from public.campaigns where id = $1", [
     r.campaign_id,
   ]);
   const campaign = camp.rows[0];
@@ -233,13 +321,42 @@ async function processarUmDestinatario(
     [dispatchId, r.organization_id, r.id, r.current_step],
   );
 
+  // ── A VARIAÇÃO POR IA (Fase 4) ──────────────────────────────────────────
+  // Só quando a campanha ligou (ai_variation) e NÃO é oficial (template fixo).
+  // O custo é da ORGANIZAÇÃO (B3). Se a variação falhar: usa o ORIGINAL e loga —
+  // a campanha não para por falha de IA, mas o operador vê o motivo.
+  let corpo = step.body ?? "";
+  if (campaign.ai_variation && !campaign.uses_official && step.body && step.body.trim() !== "") {
+    // O CONTEXTO do destinatário (nome + etiquetas) para a variação.
+    const contato = await pool.query<{ display_name: string | null; tags: string[] | null }>(
+      "select display_name, tags from public.contacts where id = $1 and organization_id = $2",
+      [r.contact_id, r.organization_id],
+    );
+    const c = contato.rows[0];
+    const variada: Awaited<ReturnType<typeof variarTextoDaCampanha>> =
+      await variarTextoDaCampanha(r.organization_id, step.body, {
+        nome: c?.display_name ?? null,
+        tags: c?.tags ?? [],
+      }).catch(
+        () => ({ ok: false as const, motivo: "erro_da_variacao" }),
+      );
+    if (variada.ok && variada.texto) {
+      corpo = variada.texto;
+    } else {
+      log.warn("[campaign.worker] variacao falhou — enviando o original", {
+        recipient_id: r.id,
+        motivo: variada.motivo,
+      });
+    }
+  }
+
   const out = await channel.send({
     tenantId: r.organization_id,
     leadId: null,
     jobId: dispatchId,
     seq: r.current_step + 1,
     conversationId,
-    body: step.body ?? "",
+    body: corpo,
     // Mídia do passo (imagem/documento/voz) — Fase 2. O path é asset da CAMPANHA
     // (`{org}/campaigns/...`); o gate isMediaPathOwnedBy aceita da mesma org.
     media_storage_path: step.media_storage_path ?? undefined,

@@ -22,7 +22,7 @@ interface RouteParams {
 
 export async function POST(req: NextRequest, { params }: RouteParams): Promise<Response> {
   const requestId = randomUUID();
-  const authz = await requireRole("agent", { requestId, resource: "campaigns" });
+  const authz = await requireRole("manager", { requestId, resource: "campaigns" });
   if (!authz.ok) return authz.response;
   const t = (texto: string) => traduzir(texto, authz.user.idioma);
   const { id } = await params;
