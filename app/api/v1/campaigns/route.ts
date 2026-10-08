@@ -11,7 +11,7 @@ import { type NextRequest } from "next/server";
 import { fail, ok } from "@/lib/api/wrappers";
 import { requireRole } from "@/lib/auth/require-role";
 import { traduzir } from "@/lib/i18n/dicionario";
-import { criarCampanhaSchema } from "@/lib/schemas/campanha";
+import { criarCampanhaSchema, mensagemDaValidacao } from "@/lib/schemas/campanha";
 import { createClient } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
@@ -83,7 +83,7 @@ export async function POST(req: NextRequest): Promise<Response> {
 
   const parsed = criarCampanhaSchema.safeParse(await req.json().catch(() => null));
   if (!parsed.success) {
-    return fail("validation_failed", t("Dados da campanha inválidos."), 422, { requestId });
+    return fail("validation_failed", mensagemDaValidacao(parsed.error), 422, { requestId });
   }
   const dados = parsed.data;
 
@@ -103,6 +103,12 @@ export async function POST(req: NextRequest): Promise<Response> {
       window_end_hour: dados.window_end_hour ?? 20,
       allowed_weekdays: dados.allowed_weekdays ?? [1, 2, 3, 4, 5],
       audience: dados.audience as never,
+      // Fase 4 — estes chegavam à rota mas o schema os descartava (não era
+      // strict): a variação por IA e a recorrência nunca salvavam.
+      ai_variation: dados.ai_variation ?? false,
+      schedule_kind: dados.schedule_kind ?? "agora",
+      scheduled_at: dados.scheduled_at ?? null,
+      recurrence: (dados.recurrence ?? null) as never,
       uses_official: false, // o admin recalcula no activate a partir das conexões
       created_by: authz.user.id,
     })
