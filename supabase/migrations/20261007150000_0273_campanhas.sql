@@ -370,19 +370,33 @@ begin
     'campaigns','campaign_recipients','campaign_steps','campaign_step_dispatches',
     'campaign_channels'
   ] loop
+    -- A catraca 0150 (rbac-config-ia-canais) reprova tabela NOVA com policy ALL
+    -- so-tenancy sem fn_role_at_least. O padrao novo e por comando + papel.
+    -- Papel minimo: agent (campanha e operacao: quem atende cria; viewer nao).
+    -- A permissao refinada (quem pode disparar) e Fase 4 do desenho.
+    -- Drop das policies ANTIGAS (tenant_isolation_*_all) — a 0273 foi aplicada
+    -- com o molde `for all`; a catraca 0150 reprovaria se as duas coexistissem.
+    execute format('drop policy if exists tenant_isolation_%1$s_all on public.%1$s', t);
+    execute format('drop policy if exists tenant_isolation_%1$s_select on public.%1$s', t);
     execute format(
-      'drop policy if exists tenant_isolation_%1$s_all on public.%1$s', t);
+      'create policy tenant_isolation_%1$s_select on public.%1$s for select to authenticated '
+      'using (organization_id in (select fn_user_org_ids()) and fn_role_at_least(organization_id, ''agent''))', t);
+    execute format('drop policy if exists tenant_isolation_%1$s_insert on public.%1$s', t);
     execute format(
-      'create policy tenant_isolation_%1$s_all on public.%1$s '
-      'for all to authenticated '
-      'using (organization_id in (select fn_user_org_ids())) '
-      'with check (organization_id in (select fn_user_org_ids()))', t);
+      'create policy tenant_isolation_%1$s_insert on public.%1$s for insert to authenticated '
+      'with check (organization_id in (select fn_user_org_ids()) and fn_role_at_least(organization_id, ''agent''))', t);
+    execute format('drop policy if exists tenant_isolation_%1$s_update on public.%1$s', t);
     execute format(
-      'revoke all on public.%1$s from anon', t);
+      'create policy tenant_isolation_%1$s_update on public.%1$s for update to authenticated '
+      'using (organization_id in (select fn_user_org_ids()) and fn_role_at_least(organization_id, ''agent'')) '
+      'with check (organization_id in (select fn_user_org_ids()) and fn_role_at_least(organization_id, ''agent''))', t);
+    execute format('drop policy if exists tenant_isolation_%1$s_delete on public.%1$s', t);
     execute format(
-      'grant select, insert, update, delete on public.%1$s to authenticated', t);
-    execute format(
-      'grant all on public.%1$s to service_role', t);
+      'create policy tenant_isolation_%1$s_delete on public.%1$s for delete to authenticated '
+      'using (organization_id in (select fn_user_org_ids()) and fn_role_at_least(organization_id, ''agent''))', t);
+    execute format('revoke all on public.%1$s from anon', t);
+    execute format('grant select, insert, update, delete on public.%1$s to authenticated', t);
+    execute format('grant all on public.%1$s to service_role', t);
   end loop;
 end $$;
 

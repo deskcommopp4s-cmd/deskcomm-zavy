@@ -7,10 +7,11 @@
  * adapter direto: isso furava 7 gates de uma vez — opt-out, LGPD, anti-ban,
  * janela, spinning, idempotência e a linha em `messages`.
  *
- * Este worker NÃO chama o adapter direto. Ele passa por `WahaChannelAdapter`
- * (o do agent-engine), cujo `send` → `sendTurnMessage` → **`sendMessageHandler`**
- * — o caminho ÚNICO do repo ("envio de mensagem SEMPRE via sendMessageHandler",
- * `send-message.ts:11`). E `sendMessageHandler` **ele próprio**:
+ * Este worker NÃO chama o adapter direto. Ele passa pelo canal que o runtime
+ * de `lib/channels/` expõe (que embrulha o adapter do agent-engine), cujo
+ * `send` → `sendTurnMessage` → **`sendMessageHandler`** — o caminho ÚNICO do
+ * repo ("envio de mensagem SEMPRE via sendMessageHandler", `send-message.ts:11`).
+ * E `sendMessageHandler` **ele próprio**:
  *   - barra `contacts.is_blocked` (opt-out — o gate irrevogável)  `_handler.ts:379`
  *   - grava a linha em `messages` (senão some do inbox — decisão 6)
  *   - reconcilia por `metadata.idempotency_key` (o ledger — idempotência)
@@ -37,7 +38,7 @@ import type pg from "pg";
 
 import { createLogger } from "@/lib/agent-engine/obs/logger";
 import { crmEdgeConfigFromEnv } from "@/lib/agent-engine/edge/crm/mcp-client";
-import { WahaChannelAdapter } from "@/lib/agent-engine/edge/channel/waha-adapter";
+import { createRuntimeSendChannel, type RuntimeSendChannel } from "@/lib/channels/runtime";
 import { decidePacing } from "@/lib/agent-engine/pacing/engine";
 import { loadPacingState } from "@/lib/agent-engine/pacing/store";
 import { loadEnv } from "@/lib/agent-engine/env";
@@ -60,7 +61,11 @@ export async function tickCampanhas(pool: pg.Pool, now: Date = new Date()): Prom
     SUPABASE_URL: env.NEXT_PUBLIC_SUPABASE_URL,
     SUPABASE_SERVICE_ROLE_KEY: env.SUPABASE_SERVICE_ROLE_KEY,
   });
-  const channel = new WahaChannelAdapter(pool, crmCfg);
+  // O canal vem de `lib/channels/runtime.ts` — DENTRO de lib/channels/ — e não
+  // de um import pelo nome do provider: a doutrina de restricao de canal vale
+  // para o TEXTO tambem (lint-channels reprova o arquivo inteiro). O runtime
+  // embrulha o adapter do agent-engine (cujo send passa por sendMessageHandler).
+  const channel = createRuntimeSendChannel(pool, crmCfg);
   const knobs = PACING_DEFAULTS;
 
   const resultado: TickResult = { reclamados: 0, enviados: 0, reagendados: 0, erros: 0 };
@@ -109,7 +114,7 @@ export async function tickCampanhas(pool: pg.Pool, now: Date = new Date()): Prom
  */
 async function processarUmDestinatario(
   pool: pg.Pool,
-  channel: WahaChannelAdapter,
+  channel: RuntimeSendChannel,
   knobs: typeof PACING_DEFAULTS,
   r: { id: string; organization_id: string; campaign_id: string; contact_id: string; channel_session_id: string; conversation_id: string | null; current_step: number },
   now: Date,
