@@ -280,6 +280,71 @@ beforeAll(() => {
              limit 1;
         end if;
 
+        -- campaigns (0273): o disparo em massa. A campanha carrega o texto que
+        -- sera enviado em massa, o filtro de publico e os contadores — vazar e
+        -- dizer a quem enviar, com que texto e quantos ja foram.
+        if not exists (select 1 from public.campaigns where organization_id = v_org) then
+          insert into public.campaigns (organization_id, name, status)
+            values (v_org, 'rls', 'rascunho');
+        end if;
+
+        -- campaign_channels: as conexoes da campanha (uma campanha = UMA classe
+        -- de provider). Vazar por aqui e apontar a campanha para o numero de
+        -- outra empresa.
+        if not exists (
+          select 1 from public.campaign_channels cc
+            join public.campaigns c on c.organization_id = v_org
+           where cc.campaign_id = c.id
+        ) then
+          insert into public.campaign_channels (organization_id, campaign_id, channel_session_id)
+            select v_org, c.id, v_sess
+              from public.campaigns c
+             where c.organization_id = v_org
+             limit 1;
+        end if;
+
+        -- campaign_steps: a sequencia da campanha. Vazar e injetar o texto/alvo.
+        if not exists (
+          select 1 from public.campaign_steps cs
+            join public.campaigns c on c.organization_id = v_org
+           where cs.campaign_id = c.id
+        ) then
+          insert into public.campaign_steps (organization_id, campaign_id, step_order, body)
+            select v_org, c.id, 1, 'rls'
+              from public.campaigns c
+             where c.organization_id = v_org
+             limit 1;
+        end if;
+
+        -- campaign_recipients: quem esta na esteira da campanha, com a conexao
+        -- resolvida. Vazar e ler/escrever o destinatario de outra empresa.
+        if not exists (
+          select 1 from public.campaign_recipients cr
+            join public.campaigns c on c.organization_id = v_org
+           where cr.campaign_id = c.id
+        ) then
+          insert into public.campaign_recipients
+            (organization_id, campaign_id, contact_id, channel_session_id, conversation_id, status, next_send_at)
+            select v_org, c.id, v_contact, v_sess, v_conv, 'pendente', now()
+              from public.campaigns c
+             where c.organization_id = v_org
+             limit 1;
+        end if;
+
+        -- campaign_step_dispatches: o grão POR ENVIO. Vazar e ver o que foi
+        -- enviado a quem (o ack, o erro, o passo).
+        if not exists (
+          select 1 from public.campaign_step_dispatches d
+            join public.campaign_recipients r on r.organization_id = v_org
+           where d.recipient_id = r.id
+        ) then
+          insert into public.campaign_step_dispatches (organization_id, recipient_id, step_order, status)
+            select v_org, r.id, 1, 'pendente'
+              from public.campaign_recipients r
+             where r.organization_id = v_org
+             limit 1;
+        end if;
+
         if not exists (select 1 from public.push_subscriptions where organization_id = v_org) then
           insert into public.push_subscriptions
             (organization_id, user_id, endpoint, p256dh, auth)
@@ -361,6 +426,15 @@ export const TABLES = [
   // existe" de "a policy cerca".
   "support_threads",
   "support_messages",
+  // migration 0273 — as 5 tabelas do disparo em massa (A1). Todas seguem o
+  // molde `tenant_isolation_*_all` (organization_id in fn_user_org_ids). Entram
+  // aqui porque a política de campanha é o caso que mais dói vazar: ela carrega
+  // o texto que vai em massa, o destinatário e o envio.
+  "campaigns",
+  "campaign_channels",
+  "campaign_steps",
+  "campaign_recipients",
+  "campaign_step_dispatches",
   // ⚠️ `webhook_lead_captures` (migration 0174) NÃO entra nesta lista, e a
   // ausência é deliberada: a policy dela exige `manager`, e o usuário semeado
   // aqui é `agent` — o controle positivo falharia por ACERTO, e a "correção"
